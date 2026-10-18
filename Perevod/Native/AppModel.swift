@@ -175,7 +175,7 @@ struct Item: Identifiable, Codable, Equatable {
                     let r = try await Api.stt(wav: mic.wav(), to: to)
                     heard = r.text
                     if heard.isEmpty { hint = "Не расслышал — повторите"; return }
-                    tr = r.tr ?? (try await Api.translate(heard, to: to))
+                    if let t = r.tr { tr = t } else { tr = try await Api.translate(heard, to: to) }
                 }
             }
             guard let tr else { return }
