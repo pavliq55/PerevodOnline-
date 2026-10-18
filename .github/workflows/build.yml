@@ -1,0 +1,49 @@
+# Облачная сборка на Маке GitHub.
+# 1) Всегда: сборка для симулятора + скриншоты экрана (без подписки Apple).
+# 2) Когда в секретах есть ключ App Store Connect (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8) и
+#    TESTFLIGHT=1 в переменных репозитория — подписанная сборка и отправка в TestFlight.
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  simulator:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1); [ -n "$X" ] && sudo xcode-select -s "$X"
+          xcodebuild -version
+      - name: Проект
+        run: brew install xcodegen && xcodegen generate
+      - name: Сборка для симулятора
+        run: |
+          set -o pipefail
+          xcodebuild -project Perevod.xcodeproj -scheme Perevod -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ci-build.log | grep -E "error:|warning: |BUILD" || true
+          test -d build/Build/Products/Debug-iphonesimulator/Perevod.app
+      - name: Запуск в симуляторе и скриншоты
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys; d=json.load(sys.stdin)['devices']
+          c=[x for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')]
+          c.sort(key=lambda x: ('Pro Max' not in x['name'], x['name'])); print(c[0]['udid'])")
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Perevod.app
+          xcrun simctl privacy "$UDID" grant microphone com.pavliq55.perevod || true
+          xcrun simctl launch "$UDID" com.pavliq55.perevod
+          mkdir -p shots; sleep 12; xcrun simctl io "$UDID" screenshot shots/1-start.png
+          xcrun simctl ui "$UDID" appearance dark; sleep 4; xcrun simctl io "$UDID" screenshot shots/2-dark.png
+          xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "Perevod"' --style compact > shots/app.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator
+          path: |
+            shots/
+            ci-build.log
+          retention-days: 7
