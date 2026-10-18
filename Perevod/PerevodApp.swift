@@ -19,11 +19,26 @@ struct PerevodApp: App {
 /// Сначала согласие (один раз), потом переводчик.
 struct Root: View {
     @AppStorage("consent_v1") private var agreed = false
+    @StateObject private var net = Net()
+    @State private var prep = false
+    @State private var demoOffline = false            // только отладка: perevod://offline — показать офлайн-экран
     var body: some View {
-        if agreed { WebScreen().ignoresSafeArea() }
-        else { ConsentView { agreed = true } }
+        if agreed {
+            ZStack {
+                WebScreen().ignoresSafeArea()
+                if !net.online || demoOffline { OfflineView().transition(.opacity) }     // связь пропала — перевод на самом айфоне
+            }
+            .animation(.easeInOut(duration: 0.2), value: net.online)
+            .sheet(isPresented: $prep) { OfflinePrepView().presentationDetents([.medium]) }
+            .onReceive(NotificationCenter.default.publisher(for: .offlinePrep)) { _ in prep = true }
+            #if DEBUG
+            .onOpenURL { u in if u.host == "offline" { demoOffline.toggle() } }
+            #endif
+        } else { ConsentView { agreed = true } }
     }
 }
+
+extension Notification.Name { static let offlinePrep = Notification.Name("offlinePrep") }
 
 enum Audio {
     /// Запись и голос в одном режиме: микрофон включается без задержки, голос — в громкий динамик

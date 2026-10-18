@@ -59,6 +59,8 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigation
         case "done": success.notificationOccurred(.success)
         case "audio": Audio.setup()
         case "ready": pageReady = true; runPending()
+        case "lang": if let c = m["to"] as? String { PartnerLang.set(c) }
+        case "offlinePrep": NotificationCenter.default.post(name: .offlinePrep, object: nil)
         default: break
         }
     }

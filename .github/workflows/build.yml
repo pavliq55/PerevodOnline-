@@ -57,6 +57,7 @@ jobs:
           xcrun simctl launch "$UDID" com.pavliq55.perevod; sleep 8
           xcrun simctl openurl "$UDID" perevod://conv; sleep 3; xcrun simctl openurl "$UDID" perevod://listen; sleep 3
           xcrun simctl io "$UDID" screenshot shots/5-after-actions.png
+          xcrun simctl openurl "$UDID" perevod://offline; sleep 3; xcrun simctl io "$UDID" screenshot shots/6-offline.png
           xcrun simctl listapps "$UDID" | grep -A3 com.pavliq55.perevod | head -5 > shots/app-alive.txt || true
           xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "Perevod"' --style compact > shots/app.log 2>&1 || true
       - uses: actions/upload-artifact@v4
