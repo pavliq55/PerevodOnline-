@@ -38,6 +38,11 @@ jobs:
           xcrun simctl launch "$UDID" com.pavliq55.perevod
           mkdir -p shots; sleep 12; xcrun simctl io "$UDID" screenshot shots/1-start.png
           xcrun simctl ui "$UDID" appearance dark; sleep 4; xcrun simctl io "$UDID" screenshot shots/2-dark.png
+          # Иконка на экране «Домой»: светлая и тёмная тема
+          xcrun simctl terminate "$UDID" com.pavliq55.perevod || true
+          xcrun simctl ui "$UDID" appearance light; xcrun simctl launch "$UDID" com.apple.springboard >/dev/null 2>&1 || true
+          sleep 3; xcrun simctl io "$UDID" screenshot shots/3-home-light.png
+          xcrun simctl ui "$UDID" appearance dark; sleep 4; xcrun simctl io "$UDID" screenshot shots/4-home-dark.png
           xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "Perevod"' --style compact > shots/app.log 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
