@@ -73,6 +73,9 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigation
     // Чужие ссылки — в Safari, наш сайт — внутри.
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let u = action.request.url, u.host == appURL.host, u.path == "/privacy" {   // политика — поверх, с кнопкой «Готово»
+            presentSafari(u); decisionHandler(.cancel); return
+        }
         if let u = action.request.url, let h = u.host, h != appURL.host, action.navigationType == .linkActivated {
             UIApplication.shared.open(u); decisionHandler(.cancel); return
         }
@@ -82,7 +85,9 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigation
     // window.open (например, страница «Показать») — открываем в этом же окне.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if navigationAction.targetFrame == nil { webView.load(navigationAction.request) }
+        if navigationAction.targetFrame == nil, let u = navigationAction.request.url {
+            if u.path == "/privacy" || u.host != appURL.host { presentSafari(u) } else { webView.load(navigationAction.request) }
+        }
         return nil
     }
 

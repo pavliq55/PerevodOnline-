@@ -36,7 +36,12 @@ jobs:
           xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Perevod.app
           xcrun simctl privacy "$UDID" grant microphone com.pavliq55.perevod || true
           xcrun simctl launch "$UDID" com.pavliq55.perevod
-          mkdir -p shots; sleep 12; xcrun simctl io "$UDID" screenshot shots/1-start.png
+          mkdir -p shots; sleep 6; xcrun simctl io "$UDID" screenshot shots/0-consent.png
+          # согласие «нажато» — дальше переводчик
+          xcrun simctl terminate "$UDID" com.pavliq55.perevod || true
+          xcrun simctl spawn "$UDID" defaults write com.pavliq55.perevod consent_v1 -bool YES
+          xcrun simctl launch "$UDID" com.pavliq55.perevod
+          sleep 12; xcrun simctl io "$UDID" screenshot shots/1-start.png
           xcrun simctl ui "$UDID" appearance dark; sleep 4; xcrun simctl io "$UDID" screenshot shots/2-dark.png
           # Иконка на экране «Домой»: тему ставим ДО установки (значок рисуется заново), плюс проверка, что
           # тёмный и тонированный варианты попали в сборку
@@ -48,6 +53,7 @@ jobs:
             xcrun simctl io "$UDID" screenshot shots/home-$th.png
           done
           # Команды (Siri / кнопка действия): ссылки perevod://… не должны ронять приложение
+          xcrun simctl spawn "$UDID" defaults write com.pavliq55.perevod consent_v1 -bool YES
           xcrun simctl launch "$UDID" com.pavliq55.perevod; sleep 8
           xcrun simctl openurl "$UDID" perevod://conv; sleep 3; xcrun simctl openurl "$UDID" perevod://listen; sleep 3
           xcrun simctl io "$UDID" screenshot shots/5-after-actions.png

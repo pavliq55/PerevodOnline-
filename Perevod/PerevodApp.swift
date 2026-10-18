@@ -9,11 +9,19 @@ struct PerevodApp: App {
     init() { Audio.setup() }
     var body: some Scene {
         WindowGroup {
-            WebScreen()
-                .ignoresSafeArea()
+            Root()
                 // perevod://listen и perevod://conv — для «Команд» и кнопки действия через «Открыть URL»
                 .onOpenURL { u in if let h = u.host, ["listen", "conv"].contains(h) { PendingAction.request(h) } }
         }
+    }
+}
+
+/// Сначала согласие (один раз), потом переводчик.
+struct Root: View {
+    @AppStorage("consent_v1") private var agreed = false
+    var body: some View {
+        if agreed { WebScreen().ignoresSafeArea() }
+        else { ConsentView { agreed = true } }
     }
 }
 
