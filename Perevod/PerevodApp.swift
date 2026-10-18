@@ -23,8 +23,10 @@ struct Root: View {
     @State private var prep = false
     // только отладка: запуск с «-demoOffline YES» (снимки экрана в облачной сборке) — показать офлайн-экран
     @State private var demoOffline = UserDefaults.standard.bool(forKey: "demoOffline")
+    private let preview = UserDefaults.standard.integer(forKey: "auraPreview")   // запуск с «-auraPreview N» — родной экран «Ауры»
     var body: some View {
-        if agreed {
+        if preview > 0 { AuraPreview(f: .variant(preview)) }
+        else if agreed {
             ZStack {
                 WebScreen().ignoresSafeArea()
                 if !net.online || demoOffline { OfflineView().transition(.opacity) }     // связь пропала — перевод на самом айфоне
