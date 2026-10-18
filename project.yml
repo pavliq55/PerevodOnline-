@@ -18,6 +18,7 @@ targets:
     sources: [Perevod, Common]
     dependencies:
       - target: ShareExt
+      - target: Controls
     entitlements:
       path: Perevod/Perevod.entitlements
       properties:
@@ -75,4 +76,24 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pavliq55.tapny.share
+        CODE_SIGN_STYLE: Automatic
+  Controls:
+    type: app-extension
+    platform: iOS
+    sources: [Controls, Common]
+    entitlements:
+      path: Controls/Controls.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.pavliq55.tapny]
+    info:
+      path: Controls/Info.plist
+      properties:
+        CFBundleDisplayName: Tapny
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pavliq55.tapny.controls
         CODE_SIGN_STYLE: Automatic
