@@ -30,6 +30,8 @@ struct WebScreen: UIViewRepresentable {
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             Audio.setup()                                       // после звонка/Siri звук снова в нужном режиме
         }
+        let bridge = context.coordinator
+        NotificationCenter.default.addObserver(forName: PendingAction.note, object: nil, queue: .main) { _ in bridge.runPending() }
         return web
     }
 
@@ -39,6 +41,14 @@ struct WebScreen: UIViewRepresentable {
 /// Мост страница ↔ айфон: window.webkit.messageHandlers.native.postMessage({t: "tick"})
 final class Bridge: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     weak var web: WKWebView?
+    private var pageReady = false
+
+    /// Siri / кнопка действия: передать действие странице, когда она готова (сообщение {t:"ready"}).
+    func runPending() {
+        guard pageReady, let web else { return }
+        guard let a = PendingAction.take() else { return }
+        web.evaluateJavaScript("window.nativeAction && window.nativeAction('\(a)')")
+    }
     private let light = UIImpactFeedbackGenerator(style: .light)
     private let success = UINotificationFeedbackGenerator()
 
@@ -48,6 +58,7 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigation
         case "tick": light.impactOccurred(intensity: 0.7)
         case "done": success.notificationOccurred(.success)
         case "audio": Audio.setup()
+        case "ready": pageReady = true; runPending()
         default: break
         }
     }
@@ -85,5 +96,7 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigation
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { webView.load(URLRequest(url: appURL)) }
     }
 
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.load(URLRequest(url: appURL)) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { pageReady = false; webView.load(URLRequest(url: appURL)) }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { pageReady = false }
 }

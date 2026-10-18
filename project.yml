@@ -2,6 +2,7 @@
 name: Perevod
 options:
   bundleIdPrefix: com.pavliq55
+  developmentLanguage: ru            # фразы Siri — по-русски
   deploymentTarget:
     iOS: "17.0"
 settings:
@@ -19,6 +20,10 @@ targets:
       path: Perevod/Info.plist
       properties:
         CFBundleDisplayName: Перевод
+        CFBundleDevelopmentRegion: ru
+        CFBundleURLTypes:
+          - CFBundleURLName: com.pavliq55.perevod
+            CFBundleURLSchemes: [perevod]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}

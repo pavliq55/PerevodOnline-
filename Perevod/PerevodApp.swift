@@ -11,6 +11,8 @@ struct PerevodApp: App {
         WindowGroup {
             WebScreen()
                 .ignoresSafeArea()
+                // perevod://listen и perevod://conv — для «Команд» и кнопки действия через «Открыть URL»
+                .onOpenURL { u in if let h = u.host, ["listen", "conv"].contains(h) { PendingAction.request(h) } }
         }
     }
 }
