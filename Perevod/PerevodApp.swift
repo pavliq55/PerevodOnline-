@@ -28,7 +28,8 @@ struct Root: View {
         if preview > 0 { AuraPreview(f: .variant(preview)) }
         else if agreed {
             ZStack {
-                WebScreen().ignoresSafeArea()
+                // родной интерфейс (18.10); старый веб — запуск с «-webUI YES»
+                if UserDefaults.standard.bool(forKey: "webUI") { WebScreen().ignoresSafeArea() } else { NativeRoot() }
                 if !net.online || demoOffline { OfflineView().transition(.opacity) }     // связь пропала — перевод на самом айфоне
             }
             .animation(.easeInOut(duration: 0.2), value: net.online)
