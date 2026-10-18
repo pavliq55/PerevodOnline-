@@ -15,15 +15,24 @@ targets:
   Perevod:
     type: application
     platform: iOS
-    sources: [Perevod]
+    sources: [Perevod, Common]
+    dependencies:
+      - target: ShareExt
+    entitlements:
+      path: Perevod/Perevod.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.pavliq55.tapny]
     info:
       path: Perevod/Info.plist
       properties:
-        CFBundleDisplayName: Перевод
+        CFBundleDisplayName: Tapny
+        INAlternativeAppNames:              # чтобы Siri понимала по-русски: «переведи в Тапни»
+          - INAlternativeAppName: Тапни
+            INAlternativeAppNamePronunciationHint: тапни
         CFBundleDevelopmentRegion: ru
         CFBundleURLTypes:
-          - CFBundleURLName: com.pavliq55.perevod
-            CFBundleURLSchemes: [perevod]
+          - CFBundleURLName: com.pavliq55.tapny
+            CFBundleURLSchemes: [tapny, perevod]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
@@ -36,8 +45,34 @@ targets:
         NSPhotoLibraryUsageDescription: Доступ к фото нужен, чтобы переводить текст на выбранных снимках.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pavliq55.perevod
+        PRODUCT_BUNDLE_IDENTIFIER: com.pavliq55.tapny
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIUserInterfaceStyle: Automatic
         CODE_SIGN_STYLE: Automatic
         ENABLE_PREVIEWS: NO
+  ShareExt:
+    type: app-extension
+    platform: iOS
+    sources: [ShareExt, Common]
+    entitlements:
+      path: ShareExt/ShareExt.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.pavliq55.tapny]
+    info:
+      path: ShareExt/Info.plist
+      properties:
+        CFBundleDisplayName: Tapny
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsImageWithMaxCount: 1
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pavliq55.tapny.share
+        CODE_SIGN_STYLE: Automatic

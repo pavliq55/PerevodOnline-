@@ -60,6 +60,7 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKUIDelegate, WKNavigation
         case "audio": Audio.setup()
         case "ready": pageReady = true; runPending()
         case "lang": if let c = m["to"] as? String { PartnerLang.set(c) }
+        case "token": if let tk = m["token"] as? String, tk.hasPrefix("d1.") { Shared.token = tk }   // для «Поделиться»
         case "offlinePrep": NotificationCenter.default.post(name: .offlinePrep, object: nil)
         default: break
         }

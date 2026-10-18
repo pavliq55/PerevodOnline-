@@ -13,7 +13,7 @@ struct ConsentView: View {
                 Image(systemName: "waveform.circle.fill").font(.system(size: 64)).foregroundStyle(yellow)
                     .padding(.top, 40)
                 Text("Перед началом").font(.largeTitle.bold())
-                Text("Чтобы переводить, «Перевод» отправляет то, что вы сами даёте на перевод, на наш сервер и в сервисы распознавания и перевода.")
+                Text("Чтобы переводить, Tapny отправляет то, что вы сами даёте на перевод, на наш сервер и в сервисы распознавания и перевода.")
                     .font(.body)
                 row("mic.fill", "Голос", "Только пока вы держите кнопку микрофона. → Deepgram, Aqua Voice, Groq — распознавание речи.")
                 row("text.bubble.fill", "Текст", "Распознанный или введённый текст. → Groq — перевод; Google, Deepgram, Gemini — озвучка.")

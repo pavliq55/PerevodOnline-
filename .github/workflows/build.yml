@@ -34,31 +34,34 @@ jobs:
           c.sort(key=lambda x: ('Pro Max' not in x['name'], x['name'])); print(c[0]['udid'])")
           xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Perevod.app
-          xcrun simctl privacy "$UDID" grant microphone com.pavliq55.perevod || true
-          xcrun simctl launch "$UDID" com.pavliq55.perevod
+          xcrun simctl privacy "$UDID" grant microphone com.pavliq55.tapny || true
+          xcrun simctl launch "$UDID" com.pavliq55.tapny
           mkdir -p shots; sleep 6; xcrun simctl io "$UDID" screenshot shots/0-consent.png
           # согласие «нажато» — дальше переводчик
-          xcrun simctl terminate "$UDID" com.pavliq55.perevod || true
-          xcrun simctl spawn "$UDID" defaults write com.pavliq55.perevod consent_v1 -bool YES
-          xcrun simctl launch "$UDID" com.pavliq55.perevod
+          xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
+          xcrun simctl spawn "$UDID" defaults write com.pavliq55.tapny consent_v1 -bool YES
+          xcrun simctl launch "$UDID" com.pavliq55.tapny
           sleep 12; xcrun simctl io "$UDID" screenshot shots/1-start.png
           xcrun simctl ui "$UDID" appearance dark; sleep 4; xcrun simctl io "$UDID" screenshot shots/2-dark.png
           # Иконка на экране «Домой»: тему ставим ДО установки (значок рисуется заново), плюс проверка, что
           # тёмный и тонированный варианты попали в сборку
           xcrun assetutil --info build/Build/Products/Debug-iphonesimulator/Perevod.app/Assets.car | grep -i -E '"Appearance"|"Name" : "AppIcon' | sort | uniq -c > shots/icon-variants.txt || true
           for th in dark light; do
-            xcrun simctl uninstall "$UDID" com.pavliq55.perevod || true
+            xcrun simctl uninstall "$UDID" com.pavliq55.tapny || true
             xcrun simctl ui "$UDID" appearance $th; sleep 3
             xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Perevod.app; sleep 6
             xcrun simctl io "$UDID" screenshot shots/home-$th.png
           done
           # Команды (Siri / кнопка действия): ссылки perevod://… не должны ронять приложение
-          xcrun simctl spawn "$UDID" defaults write com.pavliq55.perevod consent_v1 -bool YES
-          xcrun simctl launch "$UDID" com.pavliq55.perevod; sleep 8
-          xcrun simctl openurl "$UDID" perevod://conv; sleep 3; xcrun simctl openurl "$UDID" perevod://listen; sleep 3
+          xcrun simctl spawn "$UDID" defaults write com.pavliq55.tapny consent_v1 -bool YES
+          xcrun simctl launch "$UDID" com.pavliq55.tapny; sleep 8
+          sleep 2
           xcrun simctl io "$UDID" screenshot shots/5-after-actions.png
-          xcrun simctl openurl "$UDID" perevod://offline; sleep 3; xcrun simctl io "$UDID" screenshot shots/6-offline.png
-          xcrun simctl listapps "$UDID" | grep -A3 com.pavliq55.perevod | head -5 > shots/app-alive.txt || true
+          xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
+          xcrun simctl launch "$UDID" com.pavliq55.tapny -demoOffline YES; sleep 6; xcrun simctl io "$UDID" screenshot shots/6-offline.png
+          # расширение «Поделиться» встроено в приложение
+          ls build/Build/Products/Debug-iphonesimulator/Perevod.app/PlugIns/ > shots/plugins.txt 2>&1 || true
+          xcrun simctl listapps "$UDID" | grep -A3 com.pavliq55.tapny | head -5 > shots/app-alive.txt || true
           xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "Perevod"' --style compact > shots/app.log 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()

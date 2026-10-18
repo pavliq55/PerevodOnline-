@@ -1,7 +1,7 @@
 import SwiftUI
 import AVFoundation
 
-/// Приложение «Перевод»: родная оболочка вокруг переводчика perevod.molly-trade.workers.dev.
+/// Приложение Tapny (альфа, рабочее название): родная оболочка вокруг переводчика perevod.molly-trade.workers.dev.
 /// Страница грузится с сервера — улучшения приходят без пересборки. Родное здесь то, чего не даёт Safari:
 /// вибрация, голос сразу в громкий динамик, озвучка без «разблокировки» касанием.
 @main
@@ -21,7 +21,8 @@ struct Root: View {
     @AppStorage("consent_v1") private var agreed = false
     @StateObject private var net = Net()
     @State private var prep = false
-    @State private var demoOffline = false            // только отладка: perevod://offline — показать офлайн-экран
+    // только отладка: запуск с «-demoOffline YES» (снимки экрана в облачной сборке) — показать офлайн-экран
+    @State private var demoOffline = UserDefaults.standard.bool(forKey: "demoOffline")
     var body: some View {
         if agreed {
             ZStack {
@@ -31,9 +32,6 @@ struct Root: View {
             .animation(.easeInOut(duration: 0.2), value: net.online)
             .sheet(isPresented: $prep) { OfflinePrepView().presentationDetents([.medium]) }
             .onReceive(NotificationCenter.default.publisher(for: .offlinePrep)) { _ in prep = true }
-            #if DEBUG
-            .onOpenURL { u in if u.host == "offline" { demoOffline.toggle() } }
-            #endif
         } else { ConsentView { agreed = true } }
     }
 }

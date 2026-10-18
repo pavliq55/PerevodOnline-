@@ -1,8 +1,8 @@
 import AppIntents
 import Foundation
 
-/// Команды для Siri, кнопки действия и «Команд»: открыть «Перевод» и сразу слушать / режим разговора.
-/// Кнопка действия: Настройки → Кнопка действия → Команда → «Перевод» → «Начать перевод».
+/// Команды для Siri, кнопки действия и «Команд»: открыть Tapny и сразу слушать / режим разговора.
+/// Кнопка действия: Настройки → Кнопка действия → Команда → Tapny → «Начать перевод».
 enum PendingAction {
     static let note = Notification.Name("perevodAction")
     /// Действие ждёт, пока страница переводчика будет готова (приложение могло только запускаться).
@@ -19,7 +19,7 @@ enum PendingAction {
 
 struct StartTranslateIntent: AppIntent {
     static var title: LocalizedStringResource = "Начать перевод"
-    static var description = IntentDescription("Открывает «Перевод» и сразу слушает. Ещё одно касание кнопки — конец фразы.")
+    static var description = IntentDescription("Открывает Tapny и сразу слушает. Ещё одно касание кнопки — конец фразы.")
     static var openAppWhenRun: Bool = true
     @MainActor func perform() async throws -> some IntentResult {
         PendingAction.request("listen")

@@ -16,8 +16,8 @@ import Network
 
 /// Язык собеседника — тот же, что выбран в переводчике (страница сообщает {t:"lang"}).
 enum PartnerLang {
-    static var code: String { UserDefaults.standard.string(forKey: "partnerLang") ?? "id" }
-    static func set(_ c: String) { UserDefaults.standard.set(c, forKey: "partnerLang") }
+    static var code: String { Shared.partner }
+    static func set(_ c: String) { Shared.partner = c }
     static let names: [String: String] = ["id": "индонезийский", "en": "английский", "ar": "арабский", "zh": "китайский",
         "fr": "французский", "es": "испанский", "de": "немецкий", "it": "итальянский", "tr": "турецкий", "th": "тайский",
         "vi": "вьетнамский", "ja": "японский", "ko": "корейский", "hi": "хинди", "ms": "малайский", "tl": "филиппинский",
