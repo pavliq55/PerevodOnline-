@@ -37,15 +37,17 @@ struct AuraFonts {
 
 struct AuraPreview: View {
     let f: AuraFonts
+    var glassMode = UserDefaults.standard.integer(forKey: "glassMode")   // 0 обычное, 1 прозрачное, 2 прозрачное + сочный свет
+    private var clear: Bool { glassMode > 0 }
     private let ink = Color(red: 0.09, green: 0.086, blue: 0.11)
     private let dim = Color(red: 0.42, green: 0.41, blue: 0.46)
 
     var body: some View {
         ZStack {
-            AuraBackground()
+            AuraBackground(rich: glassMode == 2)
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
-                    Color.clear.frame(height: 70)
+                    Color.clear.frame(height: 4)   // лента начинается ПОД верхними кнопками — стеклу есть что преломлять
                     msg(me: true, src: "Здравствуйте, сколько стоит аренда байка на неделю?", out: "Halo, berapa sewa motor seminggu?")
                     msg(me: false, src: "Untuk seminggu 700 ribu, sudah termasuk helm.", out: "За неделю 700 тысяч, шлем включён.")
                     VStack(alignment: .leading, spacing: 10) {
@@ -60,7 +62,7 @@ struct AuraPreview: View {
             }
             .scrollIndicators(.hidden)
             VStack { topBar; Spacer(); bottomBar }
-            VStack { Spacer(); Text(f.name).font(.caption.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 6)
+            VStack { Spacer(); Text(f.name + " · " + ["обычное стекло", "прозрачное стекло", "прозрачное + сочный свет"][min(glassMode, 2)]).font(.caption.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 6)
                 .background(.black.opacity(0.75), in: Capsule()).foregroundStyle(.white).padding(.bottom, 4) }
         }
     }
@@ -84,11 +86,11 @@ struct AuraPreview: View {
     @ViewBuilder private var actions: some View {
         HStack(spacing: 10) {
             ForEach(["doc.on.doc", "arrow.up.left.and.arrow.down.right", "arrow.triangle.2.circlepath"], id: \.self) { s in
-                Image(systemName: s).font(.system(size: 16, weight: .medium)).frame(width: 44, height: 44).glass(Circle())
+                Image(systemName: s).font(.system(size: 16, weight: .medium)).frame(width: 44, height: 44).glass(Circle(), clear: clear)
             }
             Spacer()
             Label("Озвучить", systemImage: "speaker.wave.2.fill").font(f.ui).padding(.horizontal, 18).frame(height: 44)
-                .glass(Capsule(), tint: Color(red: 1, green: 0.6, blue: 0.4).opacity(0.5))
+                .glass(Capsule(), tint: Color(red: 1, green: 0.6, blue: 0.4).opacity(0.35), clear: clear)
         }
         .foregroundStyle(ink).padding(.top, 6)
     }
@@ -98,11 +100,11 @@ struct AuraPreview: View {
             HStack(spacing: 10) {
                 Orb().frame(width: 30, height: 30)
                 Text("Tapny").font(f.mark).foregroundStyle(ink)
-            }.padding(.horizontal, 14).frame(height: 50).glass(Capsule())
+            }.padding(.horizontal, 14).frame(height: 50).glass(Capsule(), clear: clear)
             Spacer()
             HStack(spacing: 18) {
                 Image(systemName: "rectangle.split.1x2"); Image(systemName: "slider.horizontal.3")
-            }.font(.system(size: 17, weight: .medium)).foregroundStyle(ink).padding(.horizontal, 18).frame(height: 50).glass(Capsule())
+            }.font(.system(size: 17, weight: .medium)).foregroundStyle(ink).padding(.horizontal, 18).frame(height: 50).glass(Capsule(), clear: clear)
         }
         .padding(.horizontal, 16).padding(.top, 6)
     }
@@ -111,15 +113,15 @@ struct AuraPreview: View {
         VStack(spacing: 14) {
             HStack(spacing: 12) {
                 Text("Русский"); Image(systemName: "arrow.left.arrow.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(dim); Text("Индонезийский")
-            }.font(f.ui).foregroundStyle(ink).padding(.horizontal, 22).frame(height: 46).glass(Capsule())
-            HStack {
-                Image(systemName: "keyboard").font(.system(size: 19)).frame(width: 58, height: 58).glass(Circle())
+            }.font(f.ui).foregroundStyle(ink).padding(.horizontal, 22).frame(height: 46).glass(Capsule(), clear: clear)
+            GlassGroup { HStack {
+                Image(systemName: "keyboard").font(.system(size: 19)).frame(width: 58, height: 58).glass(Circle(), clear: clear)
                 Spacer()
                 ZStack { Orb().frame(width: 86, height: 86); Image(systemName: "mic.fill").font(.system(size: 28, weight: .semibold)).foregroundStyle(.white) }
-                    .padding(8).glass(Circle())
+                    .padding(8).glass(Circle(), clear: clear)
                 Spacer()
-                Image(systemName: "camera").font(.system(size: 19)).frame(width: 58, height: 58).glass(Circle())
-            }.foregroundStyle(ink).padding(.horizontal, 30)
+                Image(systemName: "camera").font(.system(size: 19)).frame(width: 58, height: 58).glass(Circle(), clear: clear)
+            }.foregroundStyle(ink).padding(.horizontal, 30) }
         }
         .padding(.bottom, 30)
     }
@@ -138,9 +140,16 @@ struct Orb: View {
 
 /// Мягкие пятна света — стеклу есть что преломлять.
 struct AuraBackground: View {
+    var rich = false
     var body: some View {
         ZStack {
             Color(red: 0.99, green: 0.985, blue: 0.99)
+            if rich {   // яркие ленты света под панелями управления — у стекла появляется линза и блики
+                blob(Color(red: 1, green: 0.62, blue: 0.35), x: 0.2, y: 0.07, r: 170)
+                blob(Color(red: 0.62, green: 0.5, blue: 1), x: 0.9, y: 0.05, r: 150)
+                blob(Color(red: 1, green: 0.55, blue: 0.62), x: 0.15, y: 0.93, r: 190)
+                blob(Color(red: 1, green: 0.78, blue: 0.2), x: 0.85, y: 0.9, r: 190)
+            }
             blob(Color(red: 1, green: 0.8, blue: 0.62), x: 0.95, y: 0.12, r: 260)
             blob(Color(red: 0.8, green: 0.72, blue: 1), x: 0.0, y: 0.45, r: 280)
             blob(Color(red: 1, green: 0.88, blue: 0.5), x: 0.85, y: 0.62, r: 240)
@@ -153,12 +162,21 @@ struct AuraBackground: View {
     }
 }
 
+/// Группа стекла Apple: соседние капли сливаются и перетекают друг в друга (iOS 26).
+struct GlassGroup<C: View>: View {
+    @ViewBuilder var content: C
+    var body: some View {
+        if #available(iOS 26.0, *) { GlassEffectContainer(spacing: 24) { content } } else { content }
+    }
+}
+
 extension View {
     /// Настоящее «жидкое стекло» iOS 26; на iOS 18 — матовое стекло.
-    @ViewBuilder func glass<S: Shape>(_ shape: S, tint: Color? = nil) -> some View {
+    @ViewBuilder func glass<S: Shape>(_ shape: S, tint: Color? = nil, clear: Bool = false) -> some View {
         if #available(iOS 26.0, *) {
-            if let tint { self.glassEffect(.regular.tint(tint).interactive(), in: shape) }
-            else { self.glassEffect(.regular.interactive(), in: shape) }
+            let g: Glass = clear ? .clear : .regular
+            if let tint { self.glassEffect(g.tint(tint).interactive(), in: shape) }
+            else { self.glassEffect(g.interactive(), in: shape) }
         } else {
             self.background(.ultraThinMaterial, in: shape)
         }

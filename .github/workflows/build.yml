@@ -60,10 +60,10 @@ jobs:
           xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
           xcrun simctl launch "$UDID" com.pavliq55.tapny -demoOffline YES; sleep 6; xcrun simctl io "$UDID" screenshot shots/6-offline.png
           # родной экран «Ауры»: настоящий Liquid Glass + 6 вариантов шрифтов Apple
-          for n in 1 2 3 4 5 6; do
+          for g in 0 1 2; do
             xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
-            xcrun simctl launch "$UDID" com.pavliq55.tapny -auraPreview $n; sleep 5
-            xcrun simctl io "$UDID" screenshot shots/aura-font-$n.png
+            xcrun simctl launch "$UDID" com.pavliq55.tapny -auraPreview 2 -glassMode $g; sleep 5
+            xcrun simctl io "$UDID" screenshot shots/glass-$g.png
           done
           # расширение «Поделиться» встроено в приложение
           ls build/Build/Products/Debug-iphonesimulator/Perevod.app/PlugIns/ > shots/plugins.txt 2>&1 || true
