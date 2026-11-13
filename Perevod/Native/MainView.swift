@@ -80,7 +80,7 @@ struct MainView: View {
                         // конец ленты в покое стоит на нижнем крае экрана (над полоской «домой»); выше — ленту тянут за край
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY.rounded() } action: { y in
                             pull.end = y
-                            let v = pull.held && !m.phrase && !m.items.isEmpty ? max(0, pull.floor - y) : 0
+                            let v = pull.held && pull.fromEnd && !m.phrase && !m.items.isEmpty ? max(0, pull.floor - y) : 0
                             if v != pull.v { pull.v = v }
                             pull.note()
                         }
@@ -105,7 +105,8 @@ struct MainView: View {
                     if pull.v >= PullUp.arm, !m.phrase, let it = m.items.last { full = it }
                     pull.v = 0
                 }
-                pull.held = on; pull.phase = "\(now)"; pull.note()
+                if on, !pull.held { pull.fromEnd = pull.end - pull.floor < 12 }   // тянуть надо от самого конца ленты: обычная прокрутка вниз крупно не открывает
+            pull.held = on; pull.phase = "\(now)"; pull.note()
             }
         }
     }
@@ -245,9 +246,10 @@ struct MainView: View {
 final class PullUp: ObservableObject {
     @Published var v: CGFloat = 0
     var held = false                           // ленту держит палец
+    var fromEnd = false                        // палец лёг, когда лента уже стояла в самом конце
     var floor: CGFloat = 0                     // нижний край экрана над полоской «домой»
     var end: CGFloat = 0                       // где сейчас конец ленты
-    static let arm: CGFloat = 52               // дотянули — отпустить, и перевод откроется крупно
+    static let arm: CGFloat = 60               // дотянули — отпустить, и перевод откроется крупно
     // «-dbgPull YES» — числа жеста на экране (для проверки на видео)
     static let debug = UserDefaults.standard.bool(forKey: "dbgPull")
     @Published var dbg = ""
@@ -299,8 +301,8 @@ struct MicOrb: View {
     var body: some View {
         let ph = phase
         ZStack { LiveOrb(meter: m.meter, phase: ph); OrbGlyph(phase: ph) }
+        .overlay(OrbRim(phase: ph, start: m.recStart))   // внутри стекла: поверх стекла рисунок не виден
         .padding(8).glass(Circle(), clear: true)
-        .overlay(OrbRim(phase: ph, start: m.recStart))
         .background(OrbHalo(meter: m.meter, phase: ph, doneTick: doneTick))
         .modifier(Shake(t: CGFloat(failTick)))
         .onChange(of: m.big) { _, _ in if !m.recording { doneTick += 1 } }

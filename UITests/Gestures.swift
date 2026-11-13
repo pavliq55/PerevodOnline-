@@ -20,7 +20,7 @@ final class Gestures: XCTestCase {
     private func step(_ name: String) { print("STEP \(name) \(Date().timeIntervalSince1970)") }
 
     private func big(_ w: CGFloat, _ h: CGFloat) {
-        drag(w / 2, h * 0.5, dx: 0, dy: -200, speed: 500)
+        drag(w / 2, h * 0.5, dx: 0, dy: -260, speed: 500)
         let flip = app.buttons["Перевернуть"]
         if !flip.waitForExistence(timeout: 2) { XCTFail("не открылось крупно"); return }
         sleep(1)
@@ -52,7 +52,10 @@ final class Gestures: XCTestCase {
         drag(w / 2, h * 0.45, dx: 25, dy: 260, speed: 500); sleep(1)
         drag(w / 2, h * 0.3, dx: -25, dy: 200, speed: 500); sleep(1)
         drag(w / 2, h * 0.6, dx: 20, dy: -400, speed: 700); sleep(1)
-        drag(w / 2, h * 0.6, dx: 0, dy: -300, speed: 700); sleep(2)
+        drag(w / 2, h * 0.6, dx: 0, dy: -70, speed: 700); sleep(2)
+        if app.buttons["Перевернуть"].exists {   // обычная прокрутка к концу не должна открывать перевод крупно
+            XCTFail("открылось крупно при обычной прокрутке"); drag(w / 2, h * 0.4, dx: 0, dy: 220, speed: 600); sleep(2)
+        }
 
         step("4 удалить крупную")
         b = bubbles(); if let r = b.last { drag(r.midX + 40, r.midY - 20, dx: -170, speed: 500) }; sleep(2)
