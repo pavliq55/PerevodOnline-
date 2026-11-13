@@ -19,6 +19,15 @@ final class Gestures: XCTestCase {
     }
     private func step(_ name: String) { print("STEP \(name) \(Date().timeIntervalSince1970)") }
 
+    private func big(_ w: CGFloat, _ h: CGFloat) {
+        drag(w / 2, h * 0.5, dx: 0, dy: -200, speed: 500)
+        let flip = app.buttons["Перевернуть"]
+        if !flip.waitForExistence(timeout: 2) { XCTFail("не открылось крупно"); return }
+        sleep(1)
+        drag(w / 2, h * 0.4, dx: 0, dy: 220, speed: 600); sleep(2)
+        if flip.exists { XCTFail("не закрылось смахиванием вниз"); app.buttons.element(boundBy: app.buttons.count - 1).tap(); sleep(1) }
+    }
+
     func testSwipes() {
         continueAfterFailure = true
         app = XCUIApplication(bundleIdentifier: "com.pavliq55.tapny")
@@ -35,6 +44,9 @@ final class Gestures: XCTestCase {
 
         step("2 вправо — озвучить, вернуться")
         drag(last.midX - 40, last.midY - 20, dx: 150, speed: 300); sleep(2)
+
+        step("2б потянуть ленту вверх за край и отпустить — перевод на весь экран; смахнуть вниз — закрыть")
+        big(w, h)
 
         step("3 прокрутка вниз-вверх по репликам с боковым уводом — реплики не должны ехать вбок")
         drag(w / 2, h * 0.45, dx: 25, dy: 260, speed: 500); sleep(1)
@@ -69,6 +81,8 @@ final class Gestures: XCTestCase {
 
         step("11 вправо на обычной реплике")
         b = bubbles(); if let r = b.first { drag(r.midX - 40, r.midY, dx: 160, speed: 300) }; sleep(2)
+        step("12 то же в короткой ленте: потянуть вверх — крупно, вниз — закрыть")
+        big(w, h)
         step("конец")
     }
 }

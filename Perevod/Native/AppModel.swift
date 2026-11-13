@@ -96,7 +96,7 @@ struct Item: Identifiable, Codable, Equatable {
             big = items.last?.id
             if ud.bool(forKey: "demoFlow") { Task { await demoFlow() } }
             if ud.bool(forKey: "demoBusy") { phrase = true; busy = true; hint = "Перевожу…"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
-            if ud.bool(forKey: "demoRec") { meter.level = 0.8; phrase = true; recording = true; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
+            if ud.bool(forKey: "demoRec") { meter.level = 0.8; phrase = true; recording = true; hint = "Говорите… отпустите · ↑ закрепить · ← отмена"; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             return
         }
         voice.blocked = { [weak self] in self?.recording ?? false }

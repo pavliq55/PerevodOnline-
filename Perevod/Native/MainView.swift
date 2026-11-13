@@ -14,6 +14,7 @@ struct MainView: View {
     @State private var showPhotoMenu = false
     @State private var showLibrary = false
     @State private var tail: UUID?             // последняя реплика, которую лента уже показала
+    @State private var pull = PullUp()         // лента потянута вверх за нижний край
 
     var body: some View {
         ZStack {
@@ -71,7 +72,7 @@ struct MainView: View {
                         .transition(.opacity)
                     }
                     if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity)) }   // уходит сразу: на его месте уже готовый перевод
-                    Color.clear.frame(height: 230).id("end")
+                    Color.clear.frame(height: 230).overlay(alignment: .top) { PullHint(pull: pull) }.id("end")
                 }
                 .padding(.horizontal, 14)
                 .animation(.smooth(duration: 0.35), value: m.phrase)
@@ -86,6 +87,18 @@ struct MainView: View {
                 tail = m.items.last?.id
             }
             .onAppear { tail = m.items.last?.id }
+            // потянуть ленту вверх за нижний край и отпустить — последний перевод на весь экран (смахнуть вниз — закрыть)
+            .onScrollGeometryChange(for: CGFloat.self) { g in
+                max(0, (g.contentOffset.y + g.containerSize.height - g.contentInsets.bottom - g.contentSize.height).rounded())
+            } action: { _, v in
+                pull.v = pull.held && !m.phrase && !m.items.isEmpty ? v : 0
+            }
+            .onScrollPhaseChange { was, now in
+                pull.held = now == .interacting
+                guard was == .interacting, now != .interacting else { return }
+                if pull.v >= PullUp.arm, !m.phrase, let it = m.items.last { full = it }
+                pull.v = 0
+            }
         }
     }
 
@@ -216,6 +229,30 @@ struct MainView: View {
             }.foregroundStyle(T.ink).padding(.horizontal, 30) }
         }
         .padding(.bottom, 24)
+    }
+}
+
+/// Насколько лента потянута вверх за нижний край, пока её держит палец.
+/// Отдельный объект: за ним следит только подсказка, лента на каждый кадр не перерисовывается.
+final class PullUp: ObservableObject {
+    @Published var v: CGFloat = 0
+    var held = false
+    static let arm: CGFloat = 52               // дотянули — отпустить, и перевод откроется крупно
+}
+
+/// Подсказка под последней репликой: выезжает вместе с лентой, когда её тянут вверх за край.
+private struct PullHint: View {
+    @ObservedObject var pull: PullUp
+    var body: some View {
+        let armed = pull.v >= PullUp.arm
+        Label("Показать крупно", systemImage: "arrow.up.left.and.arrow.down.right")
+            .font(T.label).foregroundStyle(armed ? T.ink : T.dim).padding(.horizontal, 12).frame(height: 30)
+            .background(Capsule().fill(T.field))
+            .scaleEffect(armed ? 1.06 : 0.94).animation(.spring(duration: 0.25), value: armed)
+            .opacity(Double(min(max(pull.v - 10, 0) / 30, 1))).animation(.easeOut(duration: 0.15), value: pull.v == 0)
+            .padding(.top, 8)
+            .onChange(of: armed) { _, a in if a { UIImpactFeedbackGenerator(style: .medium).impactOccurred() } }
+            .allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
