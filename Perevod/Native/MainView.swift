@@ -65,7 +65,7 @@ struct MainView: View {
                     ForEach(m.items) { it in
                         if it.id == m.items.last?.id { latest(it) } else { row(it) }
                     }
-                    if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity))   // уходит сразу: на его месте уже готовый перевод }
+                    if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity)) }   // уходит сразу: на его месте уже готовый перевод
                     Color.clear.frame(height: 230).id("end")
                 }
                 .padding(.horizontal, 14)
