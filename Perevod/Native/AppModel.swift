@@ -23,7 +23,12 @@ struct Item: Identifiable, Codable, Equatable {
     @Published var busy = false                // ждём перевод
     @Published var liveText = ""
     @Published var liveDraft = ""
-    @Published var hint = "Нажмите и говорите"
+    @Published var hint = "Нажмите и говорите" {
+        didSet {   // всё, что не обычная подсказка, — сбой, который увидел человек: в журнал
+            guard hint != oldValue, !["Нажмите и говорите", "Перевожу…", "Читаю текст на фото…"].contains(hint), !hint.hasPrefix("Говорите…") else { return }
+            Log.send("hint", ["msg": hint])
+        }
+    }
     @Published var loggedIn = Shared.token != nil
     @Published var autoSpeak = Shared.defaults.object(forKey: "autoSpeak") as? Bool ?? true { didSet { Shared.defaults.set(autoSpeak, forKey: "autoSpeak") } }
     @Published var recStart = Date()
@@ -55,6 +60,7 @@ struct Item: Identifiable, Codable, Equatable {
         }
         voice.blocked = { [weak self] in self?.recording ?? false }
         warm()
+        Log.launch()
     }
 
     var lang: Lang { Langs.byId(to) }
@@ -98,7 +104,7 @@ struct Item: Identifiable, Codable, Equatable {
             if !s.ready && Date().timeIntervalSince(self.recStart) > 3 { self.weakNet = true }
         }
         Audio.setup()
-        do { try mic.start() } catch { arming = false; hint = "Микрофон не включился — разреши доступ в Настройках"; return }
+        do { try mic.start() } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
         arming = false; recording = true; recStart = Date()
         haptic.impactOccurred()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите — переведу"
@@ -131,7 +137,8 @@ struct Item: Identifiable, Codable, Equatable {
         case .voice(let d):
             if let e = expectVoice, d.count > 500 { voice.put(d, text: e.text, lang: e.lang); voice.drain() }
             expectVoice = nil
-        case .error, .closed: finalWait?.resume(returning: nil); finalWait = nil
+        case .error(let err): Log.send("err", ["at": "live", "err": err]); finalWait?.resume(returning: nil); finalWait = nil
+        case .closed: finalWait?.resume(returning: nil); finalWait = nil
         default: break
         }
     }
@@ -153,6 +160,7 @@ struct Item: Identifiable, Codable, Equatable {
         guard dur > 0.5, mic.pcm.count > 3000 else { hint = "Слишком коротко — держите кнопку, пока говорите"; liveText = ""; return }
         busy = true; hint = "Перевожу…"
         defer { busy = false; liveText = ""; liveDraft = ""; voice.drain() }
+        let t0 = Date(); var path = "final"
         // ждём итог: сервер может думать до ~6 с (Aqua + перевод); слабая связь — до 25 с
         let fin: [String: Any]? = await withCheckedContinuation { c in
             finalWait = c
@@ -167,11 +175,12 @@ struct Item: Identifiable, Codable, Equatable {
         do {
             var tr = Api.parseTr(fin?["tr"] as? [String: Any])
             var heard = text
-            if tr == nil, !heard.isEmpty { tr = try await Api.translate(heard, to: to, force: flang == "ru" ? "out" : "ru") }
+            if tr == nil, !heard.isEmpty { path = "tr"; tr = try await Api.translate(heard, to: to, force: flang == "ru" ? "out" : "ru") }
             if tr == nil {
                 if !liveText.isEmpty, liveText.split(separator: " ").count >= 3 {
-                    heard = liveText; tr = try await Api.translate(heard, to: to)
+                    path = "live"; heard = liveText; tr = try await Api.translate(heard, to: to)
                 } else {
+                    path = "stt"
                     let r = try await Api.stt(wav: mic.wav(), to: to)
                     heard = r.text
                     if heard.isEmpty { hint = "Не расслышал — повторите"; return }
@@ -179,8 +188,11 @@ struct Item: Identifiable, Codable, Equatable {
                 }
             }
             guard let tr else { return }
+            // сколько ждали перевод после отпускания и каким путём он пришёл (final — обычный; остальное — запасные)
+            Log.send("phrase", ["recMs": Int(dur * 1000), "waitMs": Log.ms(since: t0), "path": path, "ready": s?.ready ?? false, "gotFinal": fin != nil])
             add(Item(mine: tr.mine, src: tr.mine ? "ru" : (tr.src.isEmpty ? flang : tr.src), to: tr.to, text: heard, out: tr.out))
         } catch {
+            Log.send("err", ["at": "finish/" + path, "err": "\(error)", "waitMs": Log.ms(since: t0)])
             hint = (error as? Api.Fail)?.message == "pin" ? "Нужно войти заново" : "Нет связи — повторите"
             if (error as? Api.Fail)?.message == "pin" { logout() }
         }
@@ -199,7 +211,7 @@ struct Item: Identifiable, Codable, Equatable {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines); guard !t.isEmpty else { return }
         busy = true; defer { busy = false }
         do { let r = try await Api.translate(t, to: to); add(Item(mine: r.mine, src: r.mine ? "ru" : r.src, to: r.to, text: t, out: r.out)) }
-        catch { hint = "Не получилось перевести — повторите" }
+        catch { Log.send("err", ["at": "typed", "err": "\(error)"]); hint = "Не получилось перевести — повторите" }
     }
 
     func translatePhoto(_ img: UIImage) async {
@@ -209,7 +221,7 @@ struct Item: Identifiable, Codable, Equatable {
         let small = UIGraphicsImageRenderer(size: size).image { _ in img.draw(in: CGRect(origin: .zero, size: size)) }
         guard let jpg = small.jpegData(compressionQuality: 0.75) else { return }
         do { let o = try await Api.photo(jpeg: jpg); add(Item(mine: false, src: "", to: "ru", text: "📷 Фото", out: o, photo: true)) }
-        catch { hint = error.localizedDescription }
+        catch { Log.send("err", ["at": "photo", "err": "\(error)"]); hint = error.localizedDescription }
     }
 
     func flip(_ it: Item) async {
@@ -217,7 +229,7 @@ struct Item: Identifiable, Codable, Equatable {
         do {
             let r = try await Api.translate(it.text, to: it.mine ? to : (Langs.all.contains { $0.id == it.src } ? it.src : to), force: it.mine ? "ru" : "out")
             remove(it); add(Item(mine: r.mine, src: r.mine ? "ru" : r.src, to: r.to, text: it.text, out: r.out))
-        } catch { hint = "Не получилось — повторите" }
+        } catch { Log.send("err", ["at": "flip", "err": "\(error)"]); hint = "Не получилось — повторите" }
     }
 
     // MARK: Siri / кнопка действия

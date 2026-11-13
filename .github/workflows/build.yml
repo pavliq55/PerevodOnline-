@@ -103,7 +103,7 @@ jobs:
           set -o pipefail
           xcodebuild -project Perevod.xcodeproj -scheme Perevod -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ci-ipa.log | grep -E "error:|BUILD" || true
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER build 2>&1 | tee ci-ipa.log | grep -E "error:|BUILD" || true
           test -d build/Build/Products/Release-iphoneos/Perevod.app
       - name: Упаковка в .ipa
         run: |

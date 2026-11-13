@@ -21,7 +21,7 @@ import AVFoundation
         let t = URLSession.shared.webSocketTask(with: c.url!)
         task = t
         t.resume()
-        send(json: ["pin": key, "to": to, "enc": "mulaw"])
+        send(json: ["pin": key, "to": to, "enc": "mulaw", "v": Log.v])
         receive()
     }
 

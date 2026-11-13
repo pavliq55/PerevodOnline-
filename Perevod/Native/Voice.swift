@@ -52,26 +52,32 @@ import AVFoundation
     }
 
     private func play(_ id: UUID, _ text: String, _ lang: String) {
-        if let d = cache[key(text, lang)] { start(id, d); return }
+        if let d = cache[key(text, lang)] { start(id, d); Log.send("voice", ["src": "cache", "lang": lang, "kb": d.count / 1024]); return }
         loadingId = id
+        let t0 = Date()
         Task {
             do {
                 let d = try await Api.voice(text, lang: lang)
                 put(d, text: text, lang: lang)
+                Log.send("voice", ["src": "net", "lang": lang, "kb": d.count / 1024, "ms": Log.ms(since: t0), "played": loadingId == id])
                 if loadingId == id { loadingId = nil; start(id, d) }
-            } catch { if loadingId == id { loadingId = nil; drain() } }
+            } catch {
+                Log.send("err", ["at": "voice", "lang": lang, "err": "\(error)", "ms": Log.ms(since: t0)])
+                if loadingId == id { loadingId = nil; drain() }
+            }
         }
     }
 
     private func start(_ id: UUID, _ d: Data) {
         Audio.setup()
-        guard let p = try? AVAudioPlayer(data: d) else { drain(); return }
+        guard let p = try? AVAudioPlayer(data: d) else { Log.send("err", ["at": "player", "err": "не открылся звук", "kb": d.count / 1024]); drain(); return }
         p.delegate = self; p.enableRate = true; p.rate = 1.12
         player = p; playingId = id
-        p.play()
+        if !p.play() { Log.send("err", ["at": "player", "err": "play вернул false"]) }
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully flag: Bool) {
+        if !flag { Log.send("err", ["at": "player", "err": "звук оборвался"]) }
         Task { @MainActor in self.playingId = nil; self.player = nil; self.drain() }
     }
 }
