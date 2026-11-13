@@ -103,7 +103,7 @@ jobs:
   # он сам подписывает его бесплатным Apple ID. Права (группа приложения) вшиваем «пустой» подписью,
   # чтобы SideStore их увидел и выдал такие же.
   ipa:
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
