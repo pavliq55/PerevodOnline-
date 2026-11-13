@@ -1,0 +1,52 @@
+# Проверка свайпов настоящими касаниями: тест UITests водит пальцем по репликам, экран пишется на видео.
+# Запуск — вручную или отправкой в ветку swipe. Видео большое (десятки МБ), хранится 3 дня.
+name: gestures
+on:
+  push:
+    branches: [swipe]
+  workflow_dispatch:
+jobs:
+  gestures:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1); [ -n "$X" ] && sudo xcode-select -s "$X"
+          xcodebuild -version
+      - name: Проект
+        run: brew install xcodegen && xcodegen generate --spec uitest.yml
+      - name: Симулятор
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys; d=json.load(sys.stdin)['devices']
+          c=[x for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')]
+          c.sort(key=lambda x: ('Pro Max' not in x['name'], x['name'])); print(c[0]['udid'])")
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+      - name: Сборка с тестом
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing -project Perevod.xcodeproj -scheme UITests -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build CODE_SIGNING_ALLOWED=NO 2>&1 | tee ci-build.log | grep -E "error:|BUILD|TEST" || true
+          grep -q "TEST BUILD SUCCEEDED" ci-build.log
+      - name: Свайпы на видео
+        run: |
+          mkdir -p shots
+          xcrun simctl io "$UDID" recordVideo --codec h264 --force shots/gestures.mp4 & REC=$!
+          sleep 2
+          xcodebuild test-without-building -project Perevod.xcodeproj -scheme UITests \
+            -destination "id=$UDID" -derivedDataPath build 2>&1 | tee ci-test.log | grep -E "STEP|BUBBLES|error|Test Case|TEST" || true
+          xcrun simctl io "$UDID" screenshot shots/gestures-end.png
+          kill -INT $REC; wait $REC || true
+          ls -la shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gestures
+          path: |
+            shots/
+            ci-build.log
+            ci-test.log
+          retention-days: 3

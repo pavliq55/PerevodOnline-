@@ -19,7 +19,12 @@ struct Item: Identifiable, Codable, Equatable {
 
 /// Состояние приложения: история, язык собеседника, запись, онлайн-распознавание, перевод, озвучка.
 @MainActor final class AppModel: ObservableObject {
-    @Published var items: [Item] = []
+    @Published var items: [Item] = [] {
+        didSet {   // крупной становится только что добавленная реплика; после удаления соседние не меняют размер
+            if items.count > oldValue.count, let l = items.last, l.id != oldValue.last?.id { big = l.id }
+        }
+    }
+    @Published var big: UUID?                  // реплика, показанная крупно
     @Published var to: String = Shared.partner {
         didSet {
             if oldValue != to { prevTo = oldValue; Shared.defaults.set(oldValue, forKey: "prevTo") }   // прошлый язык — для свайпа по полоске языков
@@ -68,16 +73,27 @@ struct Item: Identifiable, Codable, Equatable {
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     init() {
-        load()
+        load(); big = items.last?.id
         mic.onLevel = { [weak self] v in self?.meter.level = v }
         // только для снимков в облачной сборке: «-demoUI YES» (пример разговора), «-demoRec YES» (идёт запись),
-        // «-demoFlow YES» (две фразы «как вживую» — для видео, плавно ли перестраивается экран)
+        // «-demoFlow YES» (три фразы «как вживую» — для видео, плавно ли перестраивается экран),
+        // «-demoMany YES» (длинная лента — для проверки свайпов настоящими касаниями, см. UITests)
         let ud = UserDefaults.standard
-        if ud.bool(forKey: "demoUI") || ud.bool(forKey: "demoRec") || ud.bool(forKey: "demoFlow") {
+        if ud.bool(forKey: "demoUI") || ud.bool(forKey: "demoRec") || ud.bool(forKey: "demoFlow") || ud.bool(forKey: "demoMany") {
             loggedIn = true
             items = [Item(mine: true, src: "ru", to: "id", text: "Здравствуйте, сколько стоит аренда байка на неделю?", out: "Halo, berapa sewa motor seminggu?"),
                      Item(mine: false, src: "id", to: "ru", text: "Untuk seminggu 700 ribu, sudah termasuk helm.", out: "За неделю 700 тысяч, шлем включён."),
                      Item(mine: false, src: "id", to: "ru", text: "Bisa, jam delapan sudah buka.", out: "Да, в восемь мы уже открыты.")]
+            if ud.bool(forKey: "demoMany") {
+                items += [Item(mine: true, src: "ru", to: "id", text: "А можно забрать завтра утром?", out: "Bisa diambil besok pagi?"),
+                          Item(mine: false, src: "id", to: "ru", text: "Bisa, kami buka jam delapan.", out: "Можно, мы открываемся в восемь."),
+                          Item(mine: true, src: "ru", to: "id", text: "Нужен ли залог или паспорт?", out: "Apakah perlu deposit atau paspor?"),
+                          Item(mine: false, src: "id", to: "ru", text: "Cukup fotokopi paspor saja.", out: "Достаточно копии паспорта."),
+                          Item(mine: true, src: "ru", to: "id", text: "Отлично, а шлем второй дадите?", out: "Bagus, bisa dapat helm kedua?"),
+                          Item(mine: false, src: "id", to: "ru", text: "Tentu, helm kedua gratis.", out: "Конечно, второй шлем бесплатно."),
+                          Item(mine: true, src: "ru", to: "id", text: "Хорошо, тогда до завтра", out: "Baik, sampai besok")]
+            }
+            big = items.last?.id
             if ud.bool(forKey: "demoFlow") { Task { await demoFlow() } }
             if ud.bool(forKey: "demoRec") { meter.level = 0.8; phrase = true; recording = true; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             return

@@ -1,0 +1,25 @@
+# Тот же проект + проверка свайпов настоящими касаниями (UITests). Только для облачной проверки:
+# xcodegen generate --spec uitest.yml. Обычная сборка и файл для айфона идут из project.yml.
+include:
+  - project.yml
+targets:
+  UITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: Perevod
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pavliq55.tapny.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Perevod
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  UITests:
+    build:
+      targets:
+        Perevod: all
+        UITests: [test]
+    test:
+      targets: [UITests]

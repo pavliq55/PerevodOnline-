@@ -13,6 +13,7 @@ struct MainView: View {
     @State private var showCamera = false
     @State private var showPhotoMenu = false
     @State private var showLibrary = false
+    @State private var tail: UUID?             // последняя реплика, которую лента уже показала
 
     var body: some View {
         ZStack {
@@ -63,9 +64,11 @@ struct MainView: View {
                     Color.clear.frame(height: 66)
                     if m.items.isEmpty && !m.phrase { empty }
                     ForEach(m.items) { it in
-                        SwipeRow(onDelete: { m.remove(it) }, onSpeak: { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") }) {
-                            if it.id == m.items.last?.id { latest(it) } else { row(it) }
+                        SwipeRow(onDelete: { withAnimation(.smooth(duration: 0.32)) { m.remove(it) } },
+                                 onSpeak: { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") }) {
+                            if it.id == m.big { latest(it) } else { row(it) }
                         }
+                        .transition(.opacity)
                     }
                     if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity)) }   // уходит сразу: на его месте уже готовый перевод
                     Color.clear.frame(height: 230).id("end")
@@ -77,7 +80,12 @@ struct MainView: View {
             .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)
             .onChange(of: m.phrase) { _, on in if on { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
-            .onChange(of: m.items.count) { was, now in if now > was && m.undo == nil { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
+            // к нижнему краю ведём только за новой репликой; удаление и возврат реплики ленту не двигают
+            .onChange(of: m.items.count) { was, now in
+                if now > was, m.items.last?.id != tail { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } }
+                tail = m.items.last?.id
+            }
+            .onAppear { tail = m.items.last?.id }
         }
     }
 
@@ -185,14 +193,18 @@ struct MainView: View {
     // MARK: низ — языки, клавиатура · шар · камера
     private var bottom: some View {
         VStack(spacing: 14) {
-            if m.undo != nil {
-                Button { m.restore() } label: {
-                    Label("Удалено · Вернуть", systemImage: "arrow.uturn.backward").font(T.label).foregroundStyle(T.ink).padding(.horizontal, 12).frame(height: 30)
-                        .background(Capsule().fill(T.field))
-                }.frame(height: 18)
-            } else {
-                Text(m.hint).font(T.label).foregroundStyle(T.dim).frame(height: 18)
+            ZStack {
+                if m.undo != nil {
+                    Button { withAnimation(.smooth(duration: 0.32)) { m.restore() } } label: {
+                        Label("Удалено · Вернуть", systemImage: "arrow.uturn.backward").font(T.label).foregroundStyle(T.ink).padding(.horizontal, 12).frame(height: 30)
+                            .background(Capsule().fill(T.field))
+                    }.transition(.opacity.combined(with: .scale(scale: 0.9)))
+                } else {
+                    Text(m.hint).font(T.label).foregroundStyle(T.dim).transition(.opacity)
+                }
             }
+            .frame(height: 18)
+            .animation(.easeInOut(duration: 0.22), value: m.undo != nil)
             Button { showLangs = true } label: {
                 HStack(spacing: 12) {
                     Text("Русский"); Image(systemName: "arrow.left.arrow.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(T.dim)
@@ -325,35 +337,76 @@ private struct MicRings: View {
 }
 
 /// Свайп по реплике: влево — удалить (можно вернуть), вправо — озвучить.
+/// Реплика идёт за пальцем; при удалении сначала уезжает за край, потом соседние плавно смыкаются.
 private struct SwipeRow<Content: View>: View {
     var onDelete: () -> Void
     var onSpeak: () -> Void
     @ViewBuilder var content: Content
-    @GestureState(resetTransaction: Transaction(animation: .spring(duration: 0.3))) private var dx: CGFloat = 0
-    private static var del: CGFloat { -90 }
-    private static var say: CGFloat { 70 }
-
-    private static func side(_ v: DragGesture.Value) -> CGFloat {   // только явно горизонтальное движение — прокрутке ленты не мешаем
-        abs(v.translation.width) > abs(v.translation.height) * 1.6 ? v.translation.width : 0
-    }
+    @State private var dx: CGFloat = 0
+    @State private var gone = false
+    private static var del: CGFloat { -84 }
+    private static var say: CGFloat { 60 }
 
     var body: some View {
         let armed = dx <= Self.del || dx >= Self.say
-        let show = Double(min(abs(dx), 60)) / 60.0
+        let show = Double(min(abs(dx), 56)) / 56.0
         content
             .offset(x: dx)
             .background(alignment: dx < 0 ? .trailing : .leading) {
                 Image(systemName: dx < 0 ? "trash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 20, weight: .semibold)).foregroundStyle(dx < 0 ? T.err : T.ink)
-                    .scaleEffect(armed ? 1.25 : 0.9).opacity(show).padding(.horizontal, 14)
-                    .animation(.spring(duration: 0.2), value: armed)
+                    .scaleEffect(armed ? 1.2 : 0.9).opacity(gone ? 0 : show).padding(.horizontal, 14)
+                    .animation(.spring(duration: 0.25), value: armed)
             }
-            .simultaneousGesture(DragGesture(minimumDistance: 22)
-                .updating($dx) { v, s, _ in s = min(max(Self.side(v), -150), 110) }
-                .onEnded { v in
-                    let w = Self.side(v)
-                    if w <= Self.del { onDelete() } else if w >= Self.say { onSpeak() }
-                })
-            .onChange(of: armed) { _, a in if a { UIImpactFeedbackGenerator(style: .medium).impactOccurred() } }
+            .gesture(SidePan(changed: { x in
+                guard !gone else { return }
+                dx = x < 0 ? max(x, -430) : min(x * 0.55, 92)   // вправо — с сопротивлением: это не удаление, а «кнопка»
+            }, ended: { v in
+                guard !gone else { return }
+                if let v, dx <= Self.del || (v < -900 && dx < -24) {
+                    withAnimation(.easeOut(duration: 0.2)) { gone = true; dx = -520 } completion: { onDelete() }
+                } else {
+                    if v != nil, dx >= Self.say { onSpeak() }
+                    withAnimation(.spring(duration: 0.4, bounce: 0.18)) { dx = 0 }
+                }
+            }))
+            .onChange(of: armed) { _, a in if a, !gone { UIImpactFeedbackGenerator(style: .medium).impactOccurred() } }
+            .accessibilityElement(children: .contain).accessibilityIdentifier("bubble")
+    }
+}
+
+/// Горизонтальное движение пальца по реплике. Родной распознаватель: начинается только при явно боковом
+/// движении, а прокрутка ленты ждёт его отказа — лента и реплика никогда не едут одновременно.
+private struct SidePan: UIGestureRecognizerRepresentable {
+    var changed: (CGFloat) -> Void
+    var ended: (CGFloat?) -> Void              // скорость по горизонтали; nil — жест прерван
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let g = UIPanGestureRecognizer()
+        g.maximumNumberOfTouches = 1
+        g.delegate = context.coordinator
+        return g
+    }
+
+    func handleUIGestureRecognizerAction(_ g: UIPanGestureRecognizer, context: Context) {
+        switch g.state {
+        case .began, .changed: changed(g.translation(in: g.view).x)
+        case .ended: ended(g.velocity(in: g.view).x)
+        case .cancelled, .failed: ended(nil)
+        default: break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            guard let p = g as? UIPanGestureRecognizer else { return false }
+            let v = p.velocity(in: p.view)
+            return abs(v.x) > abs(v.y) * 1.3
+        }
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            other.view is UIScrollView
+        }
     }
 }
