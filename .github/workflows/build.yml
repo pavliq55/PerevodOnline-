@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 jobs:
   simulator:
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
