@@ -86,6 +86,10 @@ final class Gestures: XCTestCase {
         b = bubbles(); if let r = b.first { drag(r.midX - 40, r.midY, dx: 160, speed: 300) }; sleep(2)
         step("12 то же в короткой ленте: потянуть вверх — крупно, вниз — закрыть")
         big(w, h)
+        step("13 как вживую: слова сразу пишутся в облаке, готовый перевод — в нём же")
+        app.terminate()
+        app.launchArguments = ["-demoFlow", "YES", "-consent_v1", "YES"]
+        app.launch(); sleep(25)
         step("конец")
     }
 }

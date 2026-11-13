@@ -65,7 +65,8 @@ struct Item: Identifiable, Codable, Equatable {
     private let mic = Mic()
     private var session: LiveSession?
     private var spare: LiveSession?
-    private var liveLang = ""
+    @Published private(set) var liveLang = ""   // на каком языке говорят сейчас: пусто — ещё не понятно
+    @Published private(set) var liveId = UUID() // номер «живого» облака; готовая реплика получает его же — облако остаётся на месте
     private var finalWait: CheckedContinuation<[String: Any]?, Never>?
     private var draftTask: Task<Void, Never>?
     private var draftText = ""
@@ -95,9 +96,9 @@ struct Item: Identifiable, Codable, Equatable {
             }
             big = items.last?.id
             if ud.bool(forKey: "demoFlow") { Task { await demoFlow() } }
-            if ud.bool(forKey: "demoBusy") { phrase = true; busy = true; hint = "Перевожу…"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
-            if ud.bool(forKey: "demoLocked") { meter.level = 0.5; phrase = true; recording = true; toggleMode = true; recStart = Date().addingTimeInterval(-22); hint = "Говорите… нажмите, чтобы закончить"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
-            if ud.bool(forKey: "demoRec") { meter.level = 0.8; phrase = true; recording = true; hint = "Говорите… отпустите · ↑ закрепить · ← отмена"; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
+            if ud.bool(forKey: "demoBusy") { liveLang = "ru"; phrase = true; busy = true; hint = "Перевожу…"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
+            if ud.bool(forKey: "demoLocked") { liveLang = "ru"; meter.level = 0.5; phrase = true; recording = true; toggleMode = true; recStart = Date().addingTimeInterval(-22); hint = "Говорите… нажмите, чтобы закончить"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
+            if ud.bool(forKey: "demoRec") { liveLang = "ru"; meter.level = 0.8; phrase = true; recording = true; hint = "Говорите… отпустите · ↑ закрепить · ← отмена"; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             return
         }
         voice.blocked = { [weak self] in self?.recording ?? false }
@@ -116,16 +117,16 @@ struct Item: Identifiable, Codable, Equatable {
                    (true, "Хорошо, спасибо", "Baik, terima kasih")]
         await nap(4)
         for (mine, text, out) in say {
-            liveText = ""; liveDraft = ""; phrase = true; recording = true; recStart = Date(); hint = "Говорите… отпустите · ↑ закрепить · ← отмена"
+            liveText = ""; liveDraft = ""; liveLang = ""; liveId = UUID(); phrase = true; recording = true; recStart = Date(); hint = "Говорите… отпустите · ↑ закрепить · ← отмена"
             var acc = ""
             for (i, w) in text.split(separator: " ").enumerated() {
-                await nap(0.15); meter.level = Double.random(in: 0.2...1); await nap(0.15); meter.level = Double.random(in: 0.1...0.9); acc += (acc.isEmpty ? "" : " ") + w; liveText = acc
+                await nap(0.15); meter.level = Double.random(in: 0.2...1); await nap(0.15); meter.level = Double.random(in: 0.1...0.9); acc += (acc.isEmpty ? "" : " ") + w; liveText = acc; liveLang = mine ? "ru" : "id"
                 if i == 4 { liveDraft = String(out.prefix(out.count / 2)) }
             }
             await nap(0.4); recording = false; meter.level = 0
             await nap(0.17); busy = true; hint = "Перевожу…"
             await nap(0.9)
-            items.append(Item(mine: mine, src: mine ? "ru" : "id", to: mine ? "id" : "ru", text: text, out: out))
+            items.append(Item(id: liveId, mine: mine, src: mine ? "ru" : "id", to: mine ? "id" : "ru", text: text, out: out))
             hint = "Нажмите и говорите"; busy = false; phrase = false; liveText = ""; liveDraft = ""
             await nap(2.5)
         }
@@ -173,7 +174,7 @@ struct Item: Identifiable, Codable, Equatable {
         let spoke = voice.playingId != nil   // только что звучал перевод — звук «до нажатия» не берём, там наш же голос
         voice.stop()
         arming = true; toggleMode = toggle; weakNet = false
-        liveText = ""; liveDraft = ""; draftText = ""; liveLang = ""
+        liveText = ""; liveDraft = ""; draftText = ""; liveLang = ""; liveId = UUID()
         let s: LiveSession
         if let sp = spare, sp.usable { s = sp } else { spare?.close(); s = LiveSession(to: to, key: k) }
         spare = nil
@@ -289,7 +290,7 @@ struct Item: Identifiable, Codable, Equatable {
             guard let tr else { return }
             // сколько ждали перевод после отпускания и каким путём он пришёл (final — обычный; остальное — запасные)
             Log.send("phrase", ["recMs": Int(dur * 1000), "waitMs": Log.ms(since: t0), "path": path, "ready": s?.ready ?? false, "gotFinal": fin != nil])
-            add(Item(mine: tr.mine, src: tr.mine ? "ru" : (tr.src.isEmpty ? flang : tr.src), to: tr.to, text: heard, out: tr.out))
+            add(Item(id: s === session ? liveId : UUID(), mine: tr.mine, src: tr.mine ? "ru" : (tr.src.isEmpty ? flang : tr.src), to: tr.to, text: heard, out: tr.out))
         } catch {
             Log.send("err", ["at": "finish/" + path, "err": "\(error)", "waitMs": Log.ms(since: t0)])
             hint = (error as? Api.Fail)?.message == "pin" ? "Нужно войти заново" : "Нет связи — повторите"

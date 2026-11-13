@@ -36,5 +36,5 @@ enum T {
     static let small = Font.system(size: 14)
     static let label = Font.system(size: 13, weight: .medium)
     static let ui = Font.system(size: 15, weight: .medium)
-    static let live = Font.system(size: 30, weight: .semibold).width(.expanded)
+    static let live = Font.system(size: 26, weight: .semibold).width(.expanded)
 }

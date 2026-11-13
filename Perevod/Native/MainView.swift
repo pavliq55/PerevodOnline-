@@ -68,14 +68,14 @@ struct MainView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Color.clear.frame(height: 66)
                     if m.items.isEmpty && !m.phrase { empty }
-                    ForEach(m.items) { it in
-                        SwipeRow(onDelete: { withAnimation(.smooth(duration: 0.32)) { m.remove(it) } },
+                    ForEach(slots) { it in
+                        let live = m.phrase && it.id == m.liveId
+                        SwipeRow(off: live, onDelete: { withAnimation(.smooth(duration: 0.32)) { m.remove(it) } },
                                  onSpeak: { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") }) {
-                            if it.id == m.big { latest(it) } else { row(it) }
+                            cell(it, live: live)
                         }
                         .transition(.opacity)
                     }
-                    if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity)) }   // уходит сразу: на его месте уже готовый перевод
                     Color.clear.frame(height: 230).overlay(alignment: .top) { PullHint(pull: pull) }.id("end")
                         // конец ленты в покое стоит на нижнем крае экрана (над полоской «домой»); выше — ленту тянут за край
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY.rounded() } action: { y in
@@ -87,6 +87,7 @@ struct MainView: View {
                 }
                 .padding(.horizontal, 14)
                 .animation(.smooth(duration: 0.35), value: m.phrase)
+                .animation(.smooth(duration: 0.3), value: m.liveLang)
                 .animation(.smooth(duration: 0.35), value: m.items.count)
             }
             .defaultScrollAnchor(.bottom)
@@ -141,42 +142,54 @@ struct MainView: View {
         }
     }
 
-    private func row(_ it: Item) -> some View {
-        bubble(it, side: 48) {
-            VStack(alignment: .leading, spacing: 5) {
-                label(it)
-                Text(it.text).font(T.small).foregroundStyle(T.dim).lineLimit(4)
-                Text(it.out).font(T.text).foregroundStyle(T.ink)
-            }
-        }
-        .onTapGesture { full = it }   // касание по переводу — на весь экран
-        .contextMenu { menu(it) }
-        .transition(.opacity)
+    /// Реплики и, пока говорят, «живое» облако в конце. У него тот же номер, что получит готовая реплика:
+    /// слова сразу пишутся в облаке, а когда перевод готов, облако остаётся на месте — меняется только то, что внутри.
+    private var slots: [Item] {
+        guard m.phrase, !m.items.contains(where: { $0.id == m.liveId }) else { return m.items }
+        return m.items + [Item(id: m.liveId, mine: m.liveLang.isEmpty || m.liveLang == "ru", src: "", to: m.to, text: "", out: "")]
     }
 
-    private func latest(_ it: Item) -> some View {
-        bubble(it, side: 22) {
-            VStack(alignment: .leading, spacing: 10) {
-                label(it, latest: true)
-                Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
-                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
-                if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
-                HStack(spacing: 8) {
-                    chip("doc.on.doc") { UIPasteboard.general.string = it.out; UINotificationFeedbackGenerator().notificationOccurred(.success) }
-                    if !it.photo { chip("arrow.triangle.2.circlepath") { Task { await m.flip(it) } } }
-                    Spacer()
-                    Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
-                        Label(voice.playingId == it.id ? "Стоп" : voice.loadingId == it.id ? "Готовлю…" : "Озвучить",
-                              systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
-                            .font(T.ui).frame(minWidth: 104).padding(.horizontal, 16).frame(height: 42)   // ширина не прыгает при смене надписи
-                            .background(Capsule().fill(T.speakTint))
-                    }
-                }
-                .foregroundStyle(T.ink).padding(.top, 4)
+    /// Одно облако на всю жизнь реплики: пока говорят → готовый перевод крупно → обычная реплика выше.
+    private func cell(_ it: Item, live: Bool) -> some View {
+        let big = live || it.id == m.big
+        return bubble(it, side: big ? 22 : 48) {
+            ZStack(alignment: .topLeading) {
+                if live { liveBody(it).transition(.opacity) }
+                else if big { latestBody(it).transition(.opacity) }
+                else { rowBody(it).transition(.opacity) }
             }
         }
-        .contextMenu { menu(it) }
-        .transition(.opacity)
+        .onTapGesture { if !live && !big { full = it } }   // касание по переводу — на весь экран
+        .contextMenu { if !live { menu(it) } }
+    }
+
+    private func rowBody(_ it: Item) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            label(it)
+            Text(it.text).font(T.small).foregroundStyle(T.dim).lineLimit(4)
+            Text(it.out).font(T.text).foregroundStyle(T.ink)
+        }
+    }
+
+    private func latestBody(_ it: Item) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            label(it, latest: true)
+            Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
+                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
+            if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
+            HStack(spacing: 8) {
+                chip("doc.on.doc") { UIPasteboard.general.string = it.out; UINotificationFeedbackGenerator().notificationOccurred(.success) }
+                if !it.photo { chip("arrow.triangle.2.circlepath") { Task { await m.flip(it) } } }
+                Spacer()
+                Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
+                    Label(voice.playingId == it.id ? "Стоп" : voice.loadingId == it.id ? "Готовлю…" : "Озвучить",
+                          systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
+                        .font(T.ui).frame(minWidth: 104).padding(.horizontal, 16).frame(height: 42)   // ширина не прыгает при смене надписи
+                        .background(Capsule().fill(T.speakTint))
+                }
+            }
+            .foregroundStyle(T.ink).padding(.top, 4)
+        }
     }
 
     @ViewBuilder private func menu(_ it: Item) -> some View {
@@ -190,15 +203,21 @@ struct MainView: View {
     }
 
     // MARK: живой текст, пока говорят
-    // Отдельной плашки «Слушаю» нет: состояние показывает сам шар — кольца в такт голосу и время внутри,
-    // пока ждём перевод — бегущая дуга; слова — в строке подсказки над языками.
-    private var liveBlock: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // место под три строки текста и черновик занято заранее: пока говорят, слова дописываются, а экран стоит
+    // Слова сразу пишутся в облаке — там же, где потом будет готовый перевод. Сторона и цвет облака — по языку:
+    // пока он не понятен, облако «моё». Состояние записи показывает шар, подсказки — в строке над языками.
+    private func liveBody(_ it: Item) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if m.liveLang.isEmpty {
+                HStack(spacing: 6) {
+                    Circle().fill(T.dim).frame(width: 8, height: 8)
+                    Text(m.recording ? "Слушаю…" : "Перевожу…").font(T.label).foregroundStyle(T.dim)
+                }
+            } else { label(it) }
+            // место под две строки текста и черновик занято заранее: пока говорят, слова дописываются, а облако стоит
             Text(m.liveText.isEmpty ? "…" : m.liveText).font(T.live).foregroundStyle(T.ink).tracking(-0.5)
-                .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
             Text(m.liveDraft.isEmpty ? " " : m.liveDraft).font(T.text).foregroundStyle(T.dim)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: 22, alignment: .topLeading)
         }
         .transaction(value: m.liveText) { $0.animation = nil }
         .transaction(value: m.liveDraft) { $0.animation = nil }
@@ -536,6 +555,7 @@ private struct Shake: GeometryEffect {
 /// Свайп по реплике: влево — удалить (можно вернуть), вправо — озвучить.
 /// Реплика идёт за пальцем; при удалении сначала уезжает за край, потом соседние плавно смыкаются.
 private struct SwipeRow<Content: View>: View {
+    var off = false                            // «живое» облако: смахивать ещё нечего
     var onDelete: () -> Void
     var onSpeak: () -> Void
     @ViewBuilder var content: Content
@@ -556,10 +576,10 @@ private struct SwipeRow<Content: View>: View {
                     .animation(.spring(duration: 0.25), value: armed)
             }
             .gesture(SidePan(changed: { x in
-                guard !gone else { return }
+                guard !gone, !off else { return }
                 dx = x < 0 ? max(x, -430) : min(x * 0.55, 92)   // вправо — с сопротивлением: это не удаление, а «кнопка»
             }, ended: { v in
-                guard !gone else { return }
+                guard !gone, !off else { return }
                 if let v, dx <= Self.del || (dx < -20 && dx + v * 0.12 <= Self.del) {   // дотянул до корзины или смахнул быстрым движением
                     withAnimation(.easeOut(duration: 0.2)) { gone = true; dx = -520 } completion: { onDelete() }
                 } else {
