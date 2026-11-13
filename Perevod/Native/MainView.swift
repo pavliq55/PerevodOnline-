@@ -22,7 +22,11 @@ struct MainView: View {
             ZStack { if m.phrase { RecordingAura(active: m.recording).transition(.opacity) } }
                 .animation(.easeInOut(duration: 0.3), value: m.phrase)
             feed
-            VStack(spacing: 0) { topBar; Spacer(); bottom }
+            VStack(spacing: 0) {
+                topBar; Spacer()
+                bottom.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY.rounded() } action: { pull.floor = $0 }
+            }
+            if PullUp.debug { PullDebug(pull: pull) }
         }
         .sheet(isPresented: $showLangs) { LangPicker().environmentObject(m).presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(m) }
@@ -73,6 +77,13 @@ struct MainView: View {
                     }
                     if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity)) }   // уходит сразу: на его месте уже готовый перевод
                     Color.clear.frame(height: 230).overlay(alignment: .top) { PullHint(pull: pull) }.id("end")
+                        // конец ленты в покое стоит на нижнем крае экрана (над полоской «домой»); выше — ленту тянут за край
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY.rounded() } action: { y in
+                            pull.end = y
+                            let v = pull.held && !m.phrase && !m.items.isEmpty ? max(0, pull.floor - y) : 0
+                            if v != pull.v { pull.v = v }
+                            pull.note()
+                        }
                 }
                 .padding(.horizontal, 14)
                 .animation(.smooth(duration: 0.35), value: m.phrase)
@@ -88,16 +99,13 @@ struct MainView: View {
             }
             .onAppear { tail = m.items.last?.id }
             // потянуть ленту вверх за нижний край и отпустить — последний перевод на весь экран (смахнуть вниз — закрыть)
-            .onScrollGeometryChange(for: CGFloat.self) { g in
-                max(0, (g.contentOffset.y + g.containerSize.height - g.contentInsets.bottom - g.contentSize.height).rounded())
-            } action: { _, v in
-                pull.v = pull.held && !m.phrase && !m.items.isEmpty ? v : 0
-            }
             .onScrollPhaseChange { was, now in
-                pull.held = now == .interacting
-                guard was == .interacting, now != .interacting else { return }
-                if pull.v >= PullUp.arm, !m.phrase, let it = m.items.last { full = it }
-                pull.v = 0
+                let on = now == .interacting || now == .tracking
+                if pull.held, !on {   // отпустили
+                    if pull.v >= PullUp.arm, !m.phrase, let it = m.items.last { full = it }
+                    pull.v = 0
+                }
+                pull.held = on; pull.phase = "\(now)"; pull.note()
             }
         }
     }
@@ -236,8 +244,23 @@ struct MainView: View {
 /// Отдельный объект: за ним следит только подсказка, лента на каждый кадр не перерисовывается.
 final class PullUp: ObservableObject {
     @Published var v: CGFloat = 0
-    var held = false
+    var held = false                           // ленту держит палец
+    var floor: CGFloat = 0                     // нижний край экрана над полоской «домой»
+    var end: CGFloat = 0                       // где сейчас конец ленты
     static let arm: CGFloat = 52               // дотянули — отпустить, и перевод откроется крупно
+    // «-dbgPull YES» — числа жеста на экране (для проверки на видео)
+    static let debug = UserDefaults.standard.bool(forKey: "dbgPull")
+    @Published var dbg = ""
+    var phase = ""
+    func note() { if Self.debug { dbg = "\(phase) floor \(Int(floor)) end \(Int(end)) v \(Int(v))" } }
+}
+
+private struct PullDebug: View {
+    @ObservedObject var pull: PullUp
+    var body: some View {
+        VStack { Text(pull.dbg).font(.system(size: 13, weight: .bold).monospacedDigit()).foregroundStyle(.white).padding(6).background(.black).padding(.top, 60); Spacer() }
+            .allowsHitTesting(false)
+    }
 }
 
 /// Подсказка под последней репликой: выезжает вместе с лентой, когда её тянут вверх за край.

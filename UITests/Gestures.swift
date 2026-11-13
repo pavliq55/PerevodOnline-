@@ -31,7 +31,7 @@ final class Gestures: XCTestCase {
     func testSwipes() {
         continueAfterFailure = true
         app = XCUIApplication(bundleIdentifier: "com.pavliq55.tapny")
-        app.launchArguments = ["-demoMany", "YES", "-consent_v1", "YES"]
+        app.launchArguments = ["-demoMany", "YES", "-consent_v1", "YES", "-dbgPull", "YES"]
         app.launch()
         sleep(3)
         let w = app.frame.width, h = app.frame.height
