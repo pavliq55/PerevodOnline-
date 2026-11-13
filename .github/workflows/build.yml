@@ -71,6 +71,11 @@ jobs:
             if [ $v = login ]; then xcrun simctl launch "$UDID" com.pavliq55.tapny; else xcrun simctl launch "$UDID" com.pavliq55.tapny -$v YES; fi
             sleep 6; xcrun simctl io "$UDID" screenshot shots/native-$v.png
           done
+          # видео: две-три фразы «как вживую» — видно, плавно ли перестраивается экран
+          xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
+          xcrun simctl io "$UDID" recordVideo --codec h264 --force shots/flow.mp4 & REC=$!
+          sleep 2; xcrun simctl launch "$UDID" com.pavliq55.tapny -demoFlow YES; sleep 30
+          kill -INT $REC; wait $REC || true
           # те же экраны в тёмном оформлении айфона
           xcrun simctl ui "$UDID" appearance dark; sleep 2
           for v in login demoUI demoRec; do

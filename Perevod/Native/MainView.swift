@@ -17,11 +17,11 @@ struct MainView: View {
     var body: some View {
         ZStack {
             AuraBackground(rich: true)
-            if m.recording || (m.busy && !m.liveText.isEmpty) { RecordingAura(active: m.recording).transition(.opacity) }
+            ZStack { if m.phrase { RecordingAura(active: m.recording).transition(.opacity) } }
+                .animation(.easeInOut(duration: 0.3), value: m.phrase)
             feed
             VStack(spacing: 0) { topBar; Spacer(); bottom }
         }
-        .animation(.easeInOut(duration: 0.25), value: m.recording)
         .sheet(isPresented: $showLangs) { LangPicker().environmentObject(m).presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(m) }
         .sheet(isPresented: $showType) { TypeSheet().environmentObject(m).presentationDetents([.height(260)]) }
@@ -54,23 +54,28 @@ struct MainView: View {
     }
 
     // MARK: лента
+    // Лента «стоит на нижнем крае»: новое появляется внизу на своём месте, старое плавно уходит вверх.
+    // Прошлый перевод остаётся крупным, пока не готов новый, — экран меняется один раз за фразу.
     private var feed: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 26) {
+                VStack(alignment: .leading, spacing: 26) {
                     Color.clear.frame(height: 66)
-                    if m.items.isEmpty && !m.recording { empty }
-                    ForEach(m.items.dropLast(m.items.isEmpty ? 0 : 1)) { it in row(it).contextMenu { menu(it) } }
-                    if let last = m.items.last, !m.recording { latest(last).id("last") }
-                    if m.recording || (m.busy && !m.liveText.isEmpty) { liveBlock.id("live") }
+                    if m.items.isEmpty && !m.phrase { empty }
+                    ForEach(m.items) { it in
+                        if it.id == m.items.last?.id { latest(it) } else { row(it) }
+                    }
+                    if m.phrase { liveBlock.transition(.opacity) }
                     Color.clear.frame(height: 230).id("end")
                 }
                 .padding(.horizontal, 22)
+                .animation(.smooth(duration: 0.35), value: m.phrase)
+                .animation(.smooth(duration: 0.35), value: m.items.count)
             }
+            .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)
-            .onChange(of: m.items.count) { _, _ in withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
-            .onChange(of: m.liveText) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
-            .onAppear { proxy.scrollTo("end", anchor: .bottom) }
+            .onChange(of: m.phrase) { _, on in if on { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
+            .onChange(of: m.items.count) { _, _ in withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } }
         }
     }
 
@@ -98,6 +103,7 @@ struct MainView: View {
         .frame(maxWidth: .infinity, alignment: it.mine ? .trailing : .leading)
         .contentShape(Rectangle()).onTapGesture { full = it }   // касание по переводу — на весь экран
         .contextMenu { menu(it) }
+        .transition(.opacity)
     }
 
     private func latest(_ it: Item) -> some View {
@@ -114,13 +120,14 @@ struct MainView: View {
                 Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
                     Label(voice.playingId == it.id ? "Стоп" : voice.loadingId == it.id ? "Готовлю…" : "Озвучить",
                           systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
-                        .font(T.ui).padding(.horizontal, 18).frame(height: 44)
+                        .font(T.ui).frame(minWidth: 104).padding(.horizontal, 18).frame(height: 44)   // ширина не прыгает при смене надписи
                 }
                 .glass(Capsule(), tint: T.speakTint, clear: true)
             }
             .foregroundStyle(T.ink).padding(.top, 6)
         }
         .contextMenu { menu(it) }
+        .transition(.opacity)
     }
 
     @ViewBuilder private func menu(_ it: Item) -> some View {
@@ -145,10 +152,14 @@ struct MainView: View {
                     Text(timeString(Date().timeIntervalSince(m.recStart))).font(T.ui.monospacedDigit()).foregroundStyle(T.dim) } }
             }
             .padding(.horizontal, 14).frame(height: 40).glass(Capsule(), clear: true)
+            // место под три строки текста и черновик занято заранее: пока говорят, слова дописываются, а экран стоит
             Text(m.liveText.isEmpty ? "…" : m.liveText).font(T.live).foregroundStyle(T.ink).tracking(-0.5)
-                .animation(.easeOut(duration: 0.15), value: m.liveText)
-            if !m.liveDraft.isEmpty { Text(m.liveDraft).font(T.text).foregroundStyle(T.dim) }
+                .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+            Text(m.liveDraft.isEmpty ? " " : m.liveDraft).font(T.text).foregroundStyle(T.dim)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
         }
+        .transaction(value: m.liveText) { $0.animation = nil }
+        .transaction(value: m.liveDraft) { $0.animation = nil }
     }
 
     private func timeString(_ t: TimeInterval) -> String { String(format: "%d:%02d", Int(t) / 60, Int(t) % 60) }

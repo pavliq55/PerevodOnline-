@@ -21,6 +21,7 @@ struct Item: Identifiable, Codable, Equatable {
     @Published var recording = false
     @Published var arming = false              // микрофон включается
     @Published var busy = false                // ждём перевод
+    @Published var phrase = false              // идёт голосовая фраза: от нажатия до готового перевода (экран в это время не перестраивается)
     @Published var liveText = ""
     @Published var liveDraft = ""
     @Published var hint = "Нажмите и говорите" {
@@ -48,14 +49,16 @@ struct Item: Identifiable, Codable, Equatable {
 
     init() {
         load()
-        // только для снимков в облачной сборке: «-demoUI YES» (пример разговора), «-demoRec YES» (идёт запись)
+        // только для снимков в облачной сборке: «-demoUI YES» (пример разговора), «-demoRec YES» (идёт запись),
+        // «-demoFlow YES» (две фразы «как вживую» — для видео, плавно ли перестраивается экран)
         let ud = UserDefaults.standard
-        if ud.bool(forKey: "demoUI") || ud.bool(forKey: "demoRec") {
+        if ud.bool(forKey: "demoUI") || ud.bool(forKey: "demoRec") || ud.bool(forKey: "demoFlow") {
             loggedIn = true
             items = [Item(mine: true, src: "ru", to: "id", text: "Здравствуйте, сколько стоит аренда байка на неделю?", out: "Halo, berapa sewa motor seminggu?"),
                      Item(mine: false, src: "id", to: "ru", text: "Untuk seminggu 700 ribu, sudah termasuk helm.", out: "За неделю 700 тысяч, шлем включён."),
                      Item(mine: false, src: "id", to: "ru", text: "Bisa, jam delapan sudah buka.", out: "Да, в восемь мы уже открыты.")]
-            if ud.bool(forKey: "demoRec") { recording = true; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
+            if ud.bool(forKey: "demoFlow") { Task { await demoFlow() } }
+            if ud.bool(forKey: "demoRec") { phrase = true; recording = true; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             return
         }
         voice.blocked = { [weak self] in self?.recording ?? false }
@@ -64,6 +67,28 @@ struct Item: Identifiable, Codable, Equatable {
         if loggedIn { Audio.setup(); mic.warm() }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in guard let self, self.loggedIn else { return }; Audio.setup(); self.mic.warm() }
+        }
+    }
+
+    private func demoFlow() async {
+        func nap(_ s: Double) async { try? await Task.sleep(nanoseconds: UInt64(s * 1e9)) }
+        let say = [(true, "Можно забрать байк завтра утром часов в восемь и вернуть через неделю", "Bisa ambil motornya besok pagi sekitar jam delapan dan kembalikan seminggu lagi?"),
+                   (false, "Bisa, jam delapan sudah buka", "Да, в восемь мы уже открыты"),
+                   (true, "Хорошо, спасибо", "Baik, terima kasih")]
+        await nap(4)
+        for (mine, text, out) in say {
+            liveText = ""; liveDraft = ""; phrase = true; recording = true; recStart = Date(); hint = "Говорите… отпустите — переведу"
+            var acc = ""
+            for (i, w) in text.split(separator: " ").enumerated() {
+                await nap(0.3); acc += (acc.isEmpty ? "" : " ") + w; liveText = acc
+                if i == 4 { liveDraft = String(out.prefix(out.count / 2)) }
+            }
+            await nap(0.4); recording = false
+            await nap(0.17); busy = true; hint = "Перевожу…"
+            await nap(0.9)
+            items.append(Item(mine: mine, src: mine ? "ru" : "id", to: mine ? "id" : "ru", text: text, out: out))
+            hint = "Нажмите и говорите"; busy = false; phrase = false; liveText = ""; liveDraft = ""
+            await nap(2.5)
         }
     }
 
@@ -110,7 +135,7 @@ struct Item: Identifiable, Codable, Equatable {
         }
         if !mic.running { Audio.setup() }
         do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
-        arming = false; recording = true; recStart = Date()
+        arming = false; phrase = true; recording = true; recStart = Date()
         haptic.impactOccurred()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите — переведу"
     }
@@ -163,9 +188,14 @@ struct Item: Identifiable, Codable, Equatable {
     }
 
     private func finish(_ s: LiveSession?, dur: TimeInterval) async {
-        guard dur > 0.5, mic.pcm.count > 3000 else { hint = "Слишком коротко — держите кнопку, пока говорите"; liveText = ""; return }
+        // пока ждали перевод, человек мог начать следующую фразу — тогда её экран не трогаем
+        guard dur > 0.5, mic.pcm.count > 3000 else {
+            hint = "Слишком коротко — держите кнопку, пока говорите"
+            if s === session { liveText = ""; phrase = false; busy = false }
+            return
+        }
         busy = true; hint = "Перевожу…"
-        defer { busy = false; liveText = ""; liveDraft = ""; voice.drain() }
+        defer { if s === session { busy = false; phrase = false; liveText = ""; liveDraft = "" }; voice.drain() }
         let t0 = Date(); var path = "final"
         // ждём итог: сервер может думать до ~6 с (Aqua + перевод); слабая связь — до 25 с
         let fin: [String: Any]? = await withCheckedContinuation { c in

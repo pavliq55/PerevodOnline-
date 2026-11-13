@@ -79,7 +79,7 @@ struct ConversationView: View {
                     Button { if let l = last { voice.say(l.id, text: l.out, lang: l.mine ? l.to : "ru") } } label: {
                         Image(systemName: "speaker.wave.2.fill").frame(width: 54, height: 54) }.glass(Circle(), clear: true)
                 }.font(.system(size: 18, weight: .semibold)).foregroundStyle(T.ink) }.padding(.vertical, 10)
-                half(text: m.recording ? (m.liveText.isEmpty ? "Слушаю…" : m.liveText) : last.map { $0.mine ? $0.text : $0.out } ?? "Держите шар и говорите",
+                half(text: m.phrase ? (m.liveText.isEmpty ? (m.recording ? "Слушаю…" : "Перевожу…") : m.liveText) : last.map { $0.mine ? $0.text : $0.out } ?? "Держите шар и говорите",
                      sub: last.map { $0.mine ? "Вы сказали" : "Собеседник сказал" } ?? "Русский")
             }
         }
