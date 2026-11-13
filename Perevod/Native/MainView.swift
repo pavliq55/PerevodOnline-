@@ -196,15 +196,15 @@ struct MicOrb: View {
         .padding(8).glass(Circle(), clear: true)
         .contentShape(Circle())
         .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { _ in
+            .onChanged { v in
                 guard !pressed else { return }
-                pressed = true; pressAt = Date()
+                pressed = true; pressAt = v.time   // время самого касания: если запуск записи задержится, касание не станет «удержанием»
                 if m.recording { m.stopRec(); ignoreEnd = true } else { m.startRec() }
             }
-            .onEnded { _ in
+            .onEnded { v in
                 pressed = false
                 if ignoreEnd { ignoreEnd = false; return }
-                if Date().timeIntervalSince(pressAt) < 0.35 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить" }
+                if v.time.timeIntervalSince(pressAt) < 0.35 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить" }
                 else { m.stopRec() }
             })
         .onChange(of: m.recording) { _, r in pulse = r }

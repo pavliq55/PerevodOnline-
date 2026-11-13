@@ -61,6 +61,10 @@ struct Item: Identifiable, Codable, Equatable {
         voice.blocked = { [weak self] in self?.recording ?? false }
         warm()
         Log.launch()
+        if loggedIn { Audio.setup(); mic.warm() }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in guard let self, self.loggedIn else { return }; Audio.setup(); self.mic.warm() }
+        }
     }
 
     var lang: Lang { Langs.byId(to) }
@@ -90,6 +94,7 @@ struct Item: Identifiable, Codable, Equatable {
     // MARK: запись
     func startRec(toggle: Bool = false) {
         guard loggedIn, !recording, !arming, let k = Shared.token else { return }
+        let spoke = voice.playingId != nil   // только что звучал перевод — звук «до нажатия» не берём, там наш же голос
         voice.stop()
         arming = true; toggleMode = toggle; weakNet = false
         liveText = ""; liveDraft = ""; draftText = ""; liveLang = ""
@@ -103,8 +108,8 @@ struct Item: Identifiable, Codable, Equatable {
             s.sendAudio(d)
             if !s.ready && Date().timeIntervalSince(self.recStart) > 3 { self.weakNet = true }
         }
-        Audio.setup()
-        do { try mic.start() } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
+        if !mic.running { Audio.setup() }
+        do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
         arming = false; recording = true; recStart = Date()
         haptic.impactOccurred()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите — переведу"
@@ -119,7 +124,8 @@ struct Item: Identifiable, Codable, Equatable {
             guard let self else { return }
             self.mic.stop()
             let dur = Date().timeIntervalSince(self.recStart)
-            s?.stop(diag: ["frames": self.mic.frames, "ms": Int(dur * 1000), "ready": s?.ready ?? false, "native": true])
+            s?.stop(diag: ["frames": self.mic.frames, "ms": Int(dur * 1000), "ready": s?.ready ?? false, "native": true,
+                           "warm": self.mic.lastWarm, "startMs": self.mic.lastStartMs, "peak": (self.mic.level * 1000).rounded() / 1000])
             Task { await self.finish(s, dur: dur) }
             self.warm()
         }

@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 
 /// Онлайн-распознавание: звук 16 кГц μ-law по WebSocket на /api/live (тот же протокол, что у сайта).
 /// Сервер: Deepgram (живые слова) → по «стоп» Aqua (чистовой текст) → перевод → голос следом.
@@ -95,9 +96,25 @@ final class Mic {
     private(set) var frames = 0
     var onChunk: ((Data) -> Void)?
     var running: Bool { engine.isRunning }
+    // Микрофон «тёплый» (13.11.2026): холодный запуск занимал 0,3–0,5 с — съедал начало фразы, а короткое касание
+    // из-за этой паузы считалось «подержал и отпустил». Теперь микрофон включается заранее (при открытии приложения
+    // и на 45 с после каждой фразы), а запись начинается мгновенно и захватывает ещё 0,3 с до нажатия.
+    // Пока запись не идёт, звук никуда не уходит и не хранится — только последние 0,3 с в памяти.
+    private var capturing = false
+    private var ring: [(raw: Data, ulaw: Data)] = []
+    private var cool: DispatchWorkItem?
+    private var peak: Int16 = 0
+    private(set) var lastWarm = false
+    private(set) var lastStartMs = 0
+    var level: Double { Double(peak) / 32768 }   // громкость записи 0…1 — в журнал: тишина это или сервер не расслышал
+    private static let keep: TimeInterval = 45
 
-    func start() throws {
-        pcm = Data(); frames = 0
+    init() {
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.cooldown() }
+    }
+
+    private func run() throws {
+        guard !engine.isRunning else { return }
         let input = engine.inputNode
         let inFmt = input.outputFormat(forBus: 0)
         converter = AVAudioConverter(from: inFmt, to: out)
@@ -107,7 +124,40 @@ final class Mic {
         try engine.start()
     }
 
+    /// Включить микрофон заранее. Только если доступ уже разрешён — запрос доступа при открытии приложения не показываем.
+    func warm() {
+        guard !capturing, AVAudioApplication.shared.recordPermission == .granted else { return }
+        try? run()
+        sleepLater()
+    }
+
+    func start(preroll: Bool = true) throws {
+        cool?.cancel()
+        let t0 = Date()
+        lastWarm = engine.isRunning
+        pcm = Data(); frames = 0; peak = 0
+        if !lastWarm { ring.removeAll(); try run() }
+        lastStartMs = Int(Date().timeIntervalSince(t0) * 1000)
+        capturing = true
+        if preroll { for c in ring { frames += 1; pcm.append(c.raw); onChunk?(c.ulaw) } }
+        ring.removeAll()
+    }
+
     func stop() {
+        capturing = false
+        sleepLater()
+    }
+
+    private func sleepLater() {
+        cool?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.cooldown() }
+        cool = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + Mic.keep, execute: w)
+    }
+
+    private func cooldown() {
+        guard !capturing else { return }
+        cool?.cancel(); ring.removeAll()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
     }
@@ -129,8 +179,15 @@ final class Mic {
             for i in 0..<n { u[i] = Mic.ulaw(p[i]) }
         }
         let raw = Data(bytes: p, count: n * 2)
+        var mx: Int16 = 0
+        for i in 0..<n { let a = p[i] == Int16.min ? Int16.max : abs(p[i]); if a > mx { mx = a } }
         DispatchQueue.main.async {
+            guard self.capturing else {   // запись не идёт: держим только последние ~0,3 с (звук до нажатия)
+                self.ring.append((raw, ulaw)); if self.ring.count > 3 { self.ring.removeFirst() }
+                return
+            }
             self.frames += 1
+            if mx > self.peak { self.peak = mx }
             if self.pcm.count < 16000 * 2 * 120 { self.pcm.append(raw) }
             self.onChunk?(ulaw)
         }
