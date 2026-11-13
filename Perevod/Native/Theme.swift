@@ -22,6 +22,10 @@ enum T {
     static let field = Color.dyn((0, 0, 0), (1, 1, 1), la: 0.05, da: 0.08)  // поле ввода
     static let speakTint = Color.dyn((1, 0.6, 0.4), (1, 0.55, 0.38), la: 0.35, da: 0.28)   // стекло кнопки «Озвучить»
     static let goTint = Color.dyn((1, 0.66, 0.24), (1, 0.66, 0.24), la: 0.42, da: 0.32)    // стекло «Перевести», «Войти»
+    // «облака» реплик: полупрозрачные, мои — тёплые справа, собеседника — холодные слева
+    static let bubbleMe = Color.dyn((1, 0.72, 0.35), (1, 0.62, 0.30), la: 0.24, da: 0.17)
+    static let bubbleThey = Color.dyn((1, 1, 1), (0.75, 0.66, 1), la: 0.45, da: 0.11)
+    static let bubbleLine = Color.dyn((1, 1, 1), (1, 1, 1), la: 0.65, da: 0.14)
     static let onWarm = Color(red: 0.16, green: 0.09, blue: 0.05)           // текст на тёплой плотной кнопке — в обеих темах
     static let warm = LinearGradient(colors: [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4)], startPoint: .leading, endPoint: .trailing)
     static func big(_ n: Int) -> Font {                 // крупный перевод: короче — крупнее

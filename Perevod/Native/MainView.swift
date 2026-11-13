@@ -59,16 +59,16 @@ struct MainView: View {
     private var feed: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
+                VStack(alignment: .leading, spacing: 12) {
                     Color.clear.frame(height: 66)
                     if m.items.isEmpty && !m.phrase { empty }
                     ForEach(m.items) { it in
                         if it.id == m.items.last?.id { latest(it) } else { row(it) }
                     }
-                    if m.phrase { liveBlock.transition(.opacity) }
+                    if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.opacity) }
                     Color.clear.frame(height: 230).id("end")
                 }
-                .padding(.horizontal, 22)
+                .padding(.horizontal, 14)
                 .animation(.smooth(duration: 0.35), value: m.phrase)
                 .animation(.smooth(duration: 0.35), value: m.items.count)
             }
@@ -83,7 +83,22 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Держите шар и говорите").font(T.big(20)).foregroundStyle(T.ink)
             Text("Вы — по-русски, собеседник — на своём. Кто говорит, Tapny поймёт сам.").font(T.text).foregroundStyle(T.dim)
-        }.padding(.top, 40)
+        }.padding(.top, 40).padding(.horizontal, 8)
+    }
+
+    /// «Облако» реплики, как в мессенджере: мои — справа, собеседника — слева.
+    private func bubble<V: View>(_ it: Item, side: CGFloat, @ViewBuilder _ content: () -> V) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        return content()
+            .padding(.horizontal, 16).padding(.vertical, 13)
+            .background { ZStack {
+                shape.fill(.ultraThinMaterial)
+                shape.fill(it.mine ? T.bubbleMe : T.bubbleThey)
+                shape.strokeBorder(T.bubbleLine, lineWidth: 0.6)
+            } }
+            .contentShape(shape)
+            .frame(maxWidth: .infinity, alignment: it.mine ? .trailing : .leading)
+            .padding(it.mine ? .leading : .trailing, side)
     }
 
     private func label(_ it: Item, latest: Bool = false) -> some View {
@@ -95,36 +110,38 @@ struct MainView: View {
     }
 
     private func row(_ it: Item) -> some View {
-        VStack(alignment: it.mine ? .trailing : .leading, spacing: 5) {
-            label(it)
-            Text(it.text).font(T.small).foregroundStyle(T.dim).multilineTextAlignment(it.mine ? .trailing : .leading).lineLimit(4)
-            Text(it.out).font(T.text).foregroundStyle(T.ink).multilineTextAlignment(it.mine ? .trailing : .leading)
+        bubble(it, side: 48) {
+            VStack(alignment: .leading, spacing: 5) {
+                label(it)
+                Text(it.text).font(T.small).foregroundStyle(T.dim).lineLimit(4)
+                Text(it.out).font(T.text).foregroundStyle(T.ink)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: it.mine ? .trailing : .leading)
-        .contentShape(Rectangle()).onTapGesture { full = it }   // касание по переводу — на весь экран
+        .onTapGesture { full = it }   // касание по переводу — на весь экран
         .contextMenu { menu(it) }
         .transition(.opacity)
     }
 
     private func latest(_ it: Item) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            label(it, latest: true)
-            Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
-                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
-            if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
-            HStack(spacing: 10) {
-                chip("doc.on.doc") { UIPasteboard.general.string = it.out; UINotificationFeedbackGenerator().notificationOccurred(.success) }
-                chip("arrow.up.left.and.arrow.down.right") { full = it }
-                if !it.photo { chip("arrow.triangle.2.circlepath") { Task { await m.flip(it) } } }
-                Spacer()
-                Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
-                    Label(voice.playingId == it.id ? "Стоп" : voice.loadingId == it.id ? "Готовлю…" : "Озвучить",
-                          systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
-                        .font(T.ui).frame(minWidth: 104).padding(.horizontal, 18).frame(height: 44)   // ширина не прыгает при смене надписи
+        bubble(it, side: 22) {
+            VStack(alignment: .leading, spacing: 10) {
+                label(it, latest: true)
+                Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
+                if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
+                HStack(spacing: 8) {
+                    chip("doc.on.doc") { UIPasteboard.general.string = it.out; UINotificationFeedbackGenerator().notificationOccurred(.success) }
+                    if !it.photo { chip("arrow.triangle.2.circlepath") { Task { await m.flip(it) } } }
+                    Spacer()
+                    Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
+                        Label(voice.playingId == it.id ? "Стоп" : voice.loadingId == it.id ? "Готовлю…" : "Озвучить",
+                              systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
+                            .font(T.ui).frame(minWidth: 104).padding(.horizontal, 16).frame(height: 42)   // ширина не прыгает при смене надписи
+                            .background(Capsule().fill(T.speakTint))
+                    }
                 }
-                .glass(Capsule(), tint: T.speakTint, clear: true)
+                .foregroundStyle(T.ink).padding(.top, 4)
             }
-            .foregroundStyle(T.ink).padding(.top, 6)
         }
         .contextMenu { menu(it) }
         .transition(.opacity)
@@ -137,8 +154,7 @@ struct MainView: View {
     }
 
     private func chip(_ icon: String, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) { Image(systemName: icon).font(.system(size: 16, weight: .medium)).frame(width: 44, height: 44) }
-            .glass(Circle(), clear: true)
+        Button(action: act) { Image(systemName: icon).font(.system(size: 16, weight: .medium)).frame(width: 42, height: 42).background(Circle().fill(T.field)) }
     }
 
     // MARK: живой текст, пока говорят
