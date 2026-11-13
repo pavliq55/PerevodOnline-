@@ -339,12 +339,13 @@ private struct SwipeRow<Content: View>: View {
 
     var body: some View {
         let armed = dx <= Self.del || dx >= Self.say
+        let show = Double(min(abs(dx), 60)) / 60.0
         content
             .offset(x: dx)
             .background(alignment: dx < 0 ? .trailing : .leading) {
                 Image(systemName: dx < 0 ? "trash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 20, weight: .semibold)).foregroundStyle(dx < 0 ? T.err : T.ink)
-                    .scaleEffect(armed ? 1.25 : 0.9).opacity(min(abs(dx) / 60, 1)).padding(.horizontal, 14)
+                    .scaleEffect(armed ? 1.25 : 0.9).opacity(show).padding(.horizontal, 14)
                     .animation(.spring(duration: 0.2), value: armed)
             }
             .simultaneousGesture(DragGesture(minimumDistance: 22)
