@@ -513,7 +513,6 @@ private struct OrbHalo: View {
                 .animation(Self.near, value: e)
                 .animation(.easeOut(duration: 0.25), value: rec)
             }
-            .blendMode(dark ? .plusLighter : .normal)
             wave(ink, tick: sentTick, to: 1.55, peak: 0.6, dur: 0.45)
             wave(ink, tick: doneTick, to: 1.45, peak: 0.9, dur: 0.65)
         }
