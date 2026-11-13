@@ -83,7 +83,7 @@ struct MainView: View {
 
     private func label(_ it: Item, latest: Bool = false) -> some View {
         HStack(spacing: 6) {
-            Circle().fill(it.mine ? T.me : T.they).frame(width: 7, height: 7)
+            Circle().fill(it.mine ? T.me : T.they).frame(width: 8, height: 8)
             Text((it.mine ? "Вы → \(Langs.byId(it.to).ru)" : it.photo ? "Фото → по-русски" : "Собеседник") + (latest ? " · только что" : ""))
                 .font(T.label).foregroundStyle(T.dim)
         }
@@ -116,7 +116,7 @@ struct MainView: View {
                           systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
                         .font(T.ui).padding(.horizontal, 18).frame(height: 44)
                 }
-                .glass(Capsule(), tint: Color(red: 1, green: 0.6, blue: 0.4).opacity(0.35), clear: true)
+                .glass(Capsule(), tint: T.speakTint, clear: true)
             }
             .foregroundStyle(T.ink).padding(.top, 6)
         }
@@ -185,11 +185,12 @@ struct MicOrb: View {
 
     var body: some View {
         ZStack {
-            Orb().frame(width: 86, height: 86)
+            Orb(glow: true).frame(width: 86, height: 86)
                 .scaleEffect(m.recording ? (pulse ? 1.1 : 0.96) : pressed ? 0.94 : 1)
                 .animation(m.recording ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .spring(duration: 0.25), value: pulse)
             Image(systemName: m.recording ? "stop.fill" : m.busy ? "ellipsis" : "mic.fill")
                 .font(.system(size: m.recording ? 24 : 28, weight: .semibold)).foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.25), radius: 2)   // белый значок на жёлтом краю шара иначе теряется
                 .symbolEffect(.pulse, isActive: m.busy)
         }
         .padding(8).glass(Circle(), clear: true)
@@ -215,13 +216,14 @@ struct MicOrb: View {
 struct RecordingAura: View {
     var active: Bool
     @State private var t = false
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         GeometryReader { g in
             ZStack {
                 Circle().fill(AngularGradient(colors: [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4),
                                                        Color(red: 0.95, green: 0.55, blue: 0.72), Color(red: 0.72, green: 0.61, blue: 1),
                                                        Color(red: 1, green: 0.79, blue: 0.24)], center: .center))
-                    .frame(width: g.size.width * 1.1).blur(radius: 60).opacity(0.75)
+                    .frame(width: g.size.width * 1.1).blur(radius: 60).opacity(scheme == .dark ? 0.48 : 0.75)
                     .rotationEffect(.degrees(t ? 360 : 0))
                     .scaleEffect(t ? 1.06 : 0.94)
             }

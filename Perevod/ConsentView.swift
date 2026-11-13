@@ -5,17 +5,17 @@ import SafariServices
 struct ConsentView: View {
     var onAgree: () -> Void
     @State private var showPolicy = false
-    private let yellow = Color(red: 1, green: 0.8, blue: 0)
+    private let yellow = T.me
 
     var body: some View {
-        ScrollView {
+        ZStack { AuraBackground(veil: .center); ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Image(systemName: "waveform.circle.fill").font(.system(size: 64)).foregroundStyle(yellow)
+                Orb().frame(width: 64, height: 64)
                     .padding(.top, 40)
-                Text("Перед началом").font(.largeTitle.bold())
+                Text("Перед началом").font(.system(size: 34, weight: .bold).width(.expanded))
                 Text("Чтобы переводить, Tapny отправляет то, что вы сами даёте на перевод, на наш сервер и в сервисы распознавания и перевода.")
                     .font(.body)
-                row("mic.fill", "Голос", "Только пока вы держите кнопку микрофона. → Deepgram, Aqua Voice, Groq — распознавание речи.")
+                row("mic.fill", "Голос", "Только пока вы держите кнопку микрофона. → Deepgram, Groq — распознавание речи.")
                 row("text.bubble.fill", "Текст", "Распознанный или введённый текст. → Groq — перевод; Google, Deepgram, Gemini — озвучка.")
                 row("camera.fill", "Фото", "Только выбранное для перевода. → Groq — чтение текста на фото.")
                 row("lock.fill", "Хранение", "Записи и фото не хранятся. Служебный журнал — до 24 часов. История переводов — только на вашем телефоне.")
@@ -24,14 +24,14 @@ struct ConsentView: View {
                     .font(.callout).foregroundStyle(yellow)
                 Button(action: onAgree) {
                     Text("Согласен, продолжить").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 16)
-                        .background(yellow).foregroundStyle(.black).clipShape(RoundedRectangle(cornerRadius: 16))
+                        .background(T.warm).foregroundStyle(T.onWarm).clipShape(Capsule())
                 }
                 .padding(.top, 8)
-                Text("Отозвать согласие можно, удалив приложение.").font(.footnote).foregroundStyle(.secondary)
+                Text("Отозвать согласие можно, удалив приложение.").font(.footnote).foregroundStyle(T.dim)
                     .padding(.bottom, 30)
             }
-            .padding(.horizontal, 24)
-        }
+            .padding(.horizontal, 24).foregroundStyle(T.ink)
+        } }
         .sheet(isPresented: $showPolicy) { SafariView(url: URL(string: "https://perevod.molly-trade.workers.dev/privacy")!) }
     }
 
@@ -40,7 +40,7 @@ struct ConsentView: View {
             Image(systemName: icon).font(.title3).foregroundStyle(yellow).frame(width: 28)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.headline)
-                Text(text).font(.subheadline).foregroundStyle(.secondary)
+                Text(text).font(.subheadline).foregroundStyle(T.dim)
             }
         }
     }

@@ -127,38 +127,59 @@ struct AuraPreview: View {
     }
 }
 
-/// Тёплый живой шар (микрофон).
+/// Тёплый живой шар (микрофон). В тёмной теме он единственный на полной яркости: блик тише, вокруг — мягкое свечение.
 struct Orb: View {
+    var glow = false
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
+        let d = scheme == .dark
         Circle().fill(AngularGradient(colors: [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4),
                                                Color(red: 0.95, green: 0.55, blue: 0.72), Color(red: 0.72, green: 0.61, blue: 1),
                                                Color(red: 1, green: 0.79, blue: 0.24)], center: .center))
-            .overlay(Circle().fill(RadialGradient(colors: [.white.opacity(0.7), .clear], center: UnitPoint(x: 0.32, y: 0.28), startRadius: 0, endRadius: 40)))
+            .overlay(Circle().fill(RadialGradient(colors: [.white.opacity(d ? 0.42 : 0.7), .clear], center: UnitPoint(x: 0.32, y: 0.28), startRadius: 0, endRadius: 40)))
             .blur(radius: 0.5)
+            .shadow(color: Color(red: 1, green: 0.58, blue: 0.4).opacity(glow && d ? 0.45 : 0), radius: 28)
+            .shadow(color: Color(red: 0.72, green: 0.61, blue: 1).opacity(glow && d ? 0.25 : 0), radius: 60)
     }
 }
 
-/// Мягкие пятна света — стеклу есть что преломлять.
+/// Мягкие пятна света — стеклу есть что преломлять. Две темы: светлая и тёмная (те же пятна, но глубже и тише).
+/// Вуаль — полоса цвета основы там, где лежит текст: пятна остаются у панелей, а текст читается в любой точке.
 struct AuraBackground: View {
+    enum Veil { case none, feed, center }
     var rich = false
+    var veil: Veil = .feed
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
+        let d = scheme == .dark
         ZStack {
-            Color(red: 0.99, green: 0.985, blue: 0.99)
+            T.base
             if rich {   // яркие ленты света под панелями управления — у стекла появляется линза и блики
-                blob(Color(red: 1, green: 0.62, blue: 0.35), x: 0.2, y: 0.07, r: 170)
-                blob(Color(red: 0.62, green: 0.5, blue: 1), x: 0.9, y: 0.05, r: 150)
-                blob(Color(red: 1, green: 0.55, blue: 0.62), x: 0.15, y: 0.93, r: 190)
-                blob(Color(red: 1, green: 0.78, blue: 0.2), x: 0.85, y: 0.9, r: 190)
+                blob(d ? (1, 0.5, 0.22) : (1, 0.62, 0.35), d ? 0.38 : 0.75, x: 0.2, y: 0.07, r: 170)
+                blob(d ? (0.52, 0.38, 1) : (0.62, 0.5, 1), d ? 0.42 : 0.55, x: 0.9, y: 0.05, r: 150)
+                blob(d ? (1, 0.4, 0.48) : (1, 0.55, 0.62), d ? 0.40 : 0.75, x: 0.15, y: 0.93, r: 190)
+                blob(d ? (1, 0.68, 0.15) : (1, 0.78, 0.2), d ? 0.32 : 0.75, x: 0.85, y: 0.9, r: 190)
             }
-            blob(Color(red: 1, green: 0.8, blue: 0.62), x: 0.95, y: 0.12, r: 260)
-            blob(Color(red: 0.8, green: 0.72, blue: 1), x: 0.0, y: 0.45, r: 280)
-            blob(Color(red: 1, green: 0.88, blue: 0.5), x: 0.85, y: 0.62, r: 240)
-            blob(Color(red: 1, green: 0.7, blue: 0.75), x: 0.4, y: 0.98, r: 300)
+            blob(d ? (0.95, 0.48, 0.3) : (1, 0.8, 0.62), d ? 0.30 : 0.75, x: 0.95, y: 0.12, r: 260)
+            blob(d ? (0.46, 0.36, 0.95) : (0.8, 0.72, 1), d ? 0.38 : 0.75, x: d ? -0.1 : 0, y: 0.45, r: 280)
+            blob(d ? (0.95, 0.6, 0.2) : (1, 0.88, 0.5), d ? 0.26 : 0.75, x: 0.85, y: 0.62, r: 240)
+            blob(d ? (0.92, 0.32, 0.5) : (1, 0.7, 0.75), d ? 0.36 : 0.75, x: 0.4, y: 0.98, r: 300)
+            switch veil {
+            case .none: EmptyView()
+            case .feed: shade(d ? 0.55 : 0.3, 0.12, 0.22, 0.62, 0.76)
+            case .center: shade(d ? 0.6 : 0.35, 0.05, 0.15, 0.85, 0.95)
+            }
         }.ignoresSafeArea()
     }
-    private func blob(_ c: Color, x: CGFloat, y: CGFloat, r: CGFloat) -> some View {
-        GeometryReader { g in Circle().fill(c.opacity(0.75)).frame(width: r * 2, height: r * 2).blur(radius: 70)
+    private func blob(_ c: (Double, Double, Double), _ o: Double, x: CGFloat, y: CGFloat, r: CGFloat) -> some View {
+        GeometryReader { g in Circle().fill(Color(red: c.0, green: c.1, blue: c.2).opacity(o)).frame(width: r * 2, height: r * 2)
+            .blur(radius: scheme == .dark ? 80 : 70)
             .position(x: g.size.width * x, y: g.size.height * y) }
+    }
+    private func shade(_ o: Double, _ a: CGFloat, _ b: CGFloat, _ c: CGFloat, _ e: CGFloat) -> some View {
+        LinearGradient(stops: [.init(color: T.base.opacity(0), location: a), .init(color: T.base.opacity(o), location: b),
+                               .init(color: T.base.opacity(o), location: c), .init(color: T.base.opacity(0), location: e)],
+                       startPoint: .top, endPoint: .bottom)
     }
 }
 

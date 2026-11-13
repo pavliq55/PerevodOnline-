@@ -30,12 +30,12 @@ struct TypeSheet: View {
         VStack(spacing: 14) {
             TextField("Напишите на любом языке…", text: $text, axis: .vertical)
                 .font(T.text).lineLimit(1...5).focused($focus)
-                .padding(16).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+                .padding(16).background(T.field, in: RoundedRectangle(cornerRadius: 20))
             Button {
                 let t = text; text = ""; dismiss()
                 Task { await m.translateTyped(t) }
             } label: { Text("Перевести").font(T.ui.weight(.semibold)).frame(maxWidth: .infinity).frame(height: 52) }
-            .glass(Capsule(), tint: T.me.opacity(0.4), clear: true)
+            .glass(Capsule(), tint: T.goTint, clear: true)
             .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(20).onAppear { focus = true }
@@ -49,7 +49,7 @@ struct FullView: View {
     @State private var flipped = false
     var body: some View {
         ZStack {
-            AuraBackground(rich: true)
+            AuraBackground(rich: true, veil: .center)
             Text(item.out).font(.system(size: 56, weight: .semibold).width(.expanded)).minimumScaleFactor(0.3)
                 .multilineTextAlignment(.center).foregroundStyle(T.ink).padding(28)
                 .rotationEffect(.degrees(flipped ? 180 : 0)).animation(.spring, value: flipped)
@@ -69,7 +69,7 @@ struct ConversationView: View {
     private var last: Item? { m.items.last }
     var body: some View {
         ZStack {
-            AuraBackground(rich: true)
+            AuraBackground(rich: true, veil: .center)
             VStack(spacing: 0) {
                 half(text: last.map { $0.mine ? $0.out : $0.text } ?? "Говорите — я переведу", sub: last.map { $0.mine ? "Перевод" : "Вы сказали" } ?? m.lang.native)
                     .rotationEffect(.degrees(180))
@@ -126,14 +126,14 @@ struct LoginView: View {
     @State private var busy = false
     var body: some View {
         ZStack {
-            AuraBackground(rich: true)
+            AuraBackground(rich: true, veil: .none)
             VStack(alignment: .leading, spacing: 18) {
                 Orb().frame(width: 64, height: 64)
                 Text("Tapny").font(.system(size: 40, weight: .bold).width(.expanded)).foregroundStyle(T.ink)
                 Text("Введите PIN, чтобы начать").font(T.text).foregroundStyle(T.dim)
                 SecureField("PIN", text: $pin).keyboardType(.numberPad).textContentType(.password).font(.system(size: 22, weight: .medium))
                     .padding(.horizontal, 20).frame(height: 58).glass(Capsule(), clear: true)
-                if !err.isEmpty { Text(err).font(T.small).foregroundStyle(.red) }
+                if !err.isEmpty { Text(err).font(T.small).foregroundStyle(T.err) }
                 Button {
                     busy = true; err = ""
                     Task {
@@ -141,7 +141,7 @@ struct LoginView: View {
                         busy = false
                     }
                 } label: { Text(busy ? "Вхожу…" : "Войти").font(T.ui.weight(.semibold)).frame(maxWidth: .infinity).frame(height: 56) }
-                .glass(Capsule(), tint: T.me.opacity(0.45), clear: true).disabled(pin.count < 4 || busy)
+                .glass(Capsule(), tint: T.goTint, clear: true).disabled(pin.count < 4 || busy)
                 Spacer()
             }
             .foregroundStyle(T.ink).padding(28).padding(.top, 60)
