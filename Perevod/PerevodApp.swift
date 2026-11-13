@@ -44,11 +44,17 @@ extension Notification.Name { static let offlinePrep = Notification.Name("offlin
 enum Audio {
     /// Запись и голос в одном режиме: микрофон включается без задержки, голос — в громкий динамик
     /// (в Safari после записи он шёл в верхний «разговорный»), наушники и AirPods тоже работают.
+    /// «Куда звучит» в настройках: 0 — сам (наушники, если подключены, иначе громкий динамик), 1 — всегда громкий динамик, 2 — к уху.
+    static var out = Shared.defaults.integer(forKey: "output")
+    private static var forced = false
     static func setup() {
         let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.playAndRecord, mode: .default,
-                           options: [.defaultToSpeaker, .allowBluetoothA2DP])
+        var o: AVAudioSession.CategoryOptions = [.allowBluetoothA2DP]
+        if out != 2 { o.insert(.defaultToSpeaker) }
+        try? s.setCategory(.playAndRecord, mode: .default, options: o)
         try? s.setAllowHapticsAndSystemSoundsDuringRecording(true)   // иначе при включённом микрофоне айфон глушит всю вибрацию
         try? s.setActive(true)
+        if out == 1 { if s.currentRoute.outputs.first?.portType != .builtInSpeaker { try? s.overrideOutputAudioPort(.speaker) }; forced = true }
+        else if forced { try? s.overrideOutputAudioPort(.none); forced = false }
     }
 }

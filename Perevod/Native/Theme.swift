@@ -28,13 +28,14 @@ enum T {
     static let bubbleLine = Color.dyn((1, 1, 1), (1, 1, 1), la: 0.65, da: 0.14)
     static let onWarm = Color(red: 0.16, green: 0.09, blue: 0.05)           // текст на тёплой плотной кнопке — в обеих темах
     static let warm = LinearGradient(colors: [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4)], startPoint: .leading, endPoint: .trailing)
+    static var scale: CGFloat = 1                       // «Размер текста» в настройках: 1 — обычный, 1.22 — крупный
     static func big(_ n: Int) -> Font {                 // крупный перевод: короче — крупнее
-        .system(size: n < 30 ? 34 : n < 70 ? 29 : n < 140 ? 24 : 20, weight: .semibold).width(.expanded)
+        .system(size: (n < 30 ? 34 : n < 70 ? 29 : n < 140 ? 24 : 20) * scale, weight: .semibold).width(.expanded)
     }
     static let mark = Font.system(size: 21, weight: .bold).width(.expanded)
-    static let text = Font.system(size: 18, weight: .medium)
-    static let small = Font.system(size: 14)
-    static let label = Font.system(size: 13, weight: .medium)
+    static var text: Font { .system(size: 18 * scale, weight: .medium) }
+    static var small: Font { .system(size: 14 * scale) }
+    static var label: Font { .system(size: 13 * scale, weight: .medium) }
     static let ui = Font.system(size: 15, weight: .medium)
-    static let live = Font.system(size: 26, weight: .semibold).width(.expanded)
+    static var live: Font { .system(size: 26 * scale, weight: .semibold).width(.expanded) }
 }

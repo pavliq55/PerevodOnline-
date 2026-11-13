@@ -36,7 +36,7 @@ struct Item: Identifiable, Codable, Equatable {
     func swapLang() {
         guard !recording, !prevTo.isEmpty, prevTo != to else { hint = "Выберите второй язык — потом меняйте свайпом"; return }
         to = prevTo
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Hap.impact()
         hint = "Нажмите и говорите"
     }
     @Published var recording = false
@@ -53,8 +53,32 @@ struct Item: Identifiable, Codable, Equatable {
     }
     @Published var loggedIn = Shared.token != nil
     @Published var autoSpeak = Shared.defaults.object(forKey: "autoSpeak") as? Bool ?? true { didSet { Shared.defaults.set(autoSpeak, forKey: "autoSpeak") } }
+    // настройки (экран «Настройки») — хранятся на айфоне
+    @Published var speakThem = Pref.bool("speakThem", false) { didSet { Pref.set(speakThem, "speakThem") } }          // озвучивать и собеседника
+    @Published var voiceSpeed = Pref.int("voiceSpeed", 1) { didSet { Pref.set(voiceSpeed, "voiceSpeed"); applyVoice() } }   // 0 медленнее · 1 обычно · 2 быстрее
+    @Published var voiceFemale = Pref.bool("voiceFemale", false) { didSet { Pref.set(voiceFemale, "voiceFemale"); applyVoice(); voice.flush(); rewarm() } }
+    @Published var output = Pref.int("output", 0) { didSet { Pref.set(output, "output"); Audio.out = output; Audio.setup() } }   // 0 сам · 1 динамик · 2 к уху
+    @Published var orbMode = Pref.int("orbMode", 0) { didSet { Pref.set(orbMode, "orbMode") } }                       // 0 держать или нажать · 1 только держать · 2 только нажать
+    @Published var autoStop = Pref.bool("autoStop", false) { didSet { Pref.set(autoStop, "autoStop") } }              // закреплённая запись сама заканчивается по тишине
+    @Published var haptics = Pref.bool("haptics", true) { didSet { Pref.set(haptics, "haptics"); Hap.on = haptics } }
+    @Published var textBig = Pref.bool("textBig", false) { didSet { Pref.set(textBig, "textBig"); T.scale = textBig ? AppModel.bigScale : 1 } }
+    @Published var theme = Pref.int("theme", 0) { didSet { Pref.set(theme, "theme"); Look.apply(theme) } }           // 0 как в айфоне · 1 светлая · 2 тёмная
+    @Published var keepAwake = Pref.bool("keepAwake", false) { didSet { Pref.set(keepAwake, "keepAwake"); UIApplication.shared.isIdleTimerDisabled = keepAwake } }
+    @Published var showDraft = Pref.bool("showDraft", true) { didSet { Pref.set(showDraft, "showDraft"); if !showDraft { liveDraft = "" } } }
+    @Published var casual = Pref.bool("casual", false) { didSet { Pref.set(casual, "casual"); applyTr(); rewarm() } } // тон: по-простому, на «ты»
+    @Published var words: [Word] = Pref.words { didSet { Pref.words = words; applyTr(); rewarm() } }                  // «Мои слова»
+    @Published var keep = Pref.int("keep", 60) { didSet { Pref.set(keep, "keep"); save() } }                          // сколько фраз хранить; 0 — не хранить
+    static let bigScale: CGFloat = 1.22
+    private static let rates: [Float] = [0.95, 1.12, 1.3]
+    private func applyVoice() { voice.rate = AppModel.rates[min(max(voiceSpeed, 0), 2)]; Api.female = voiceFemale }
+    private func applyTr() { Api.tone = casual ? "casual" : ""; Api.gl = words.map { [$0.a, $0.b] } }
+    /// Сменили тон, слова или голос — запасное соединение открываем заново, уже с ними.
+    private func rewarm() { spare?.close(); spare = nil; warm() }
+
     @Published var recStart = Date()
-    @Published var toggleMode = false
+    @Published var toggleMode = false { didSet { if toggleMode { lastLoud = Date(); lastWord = Date() } } }
+    private var lastLoud = Date()              // когда последний раз был слышен голос
+    private var lastWord = Date()              // когда последний раз дописались слова
     @Published var weakNet = false
 
     let voice = Voice()
@@ -76,13 +100,16 @@ struct Item: Identifiable, Codable, Equatable {
 
     init() {
         load(); big = items.last?.id
-        mic.onLevel = { [weak self] v in self?.meter.level = v }
+        mic.onLevel = { [weak self] v in self?.heard(v) }
+        Hap.on = haptics; T.scale = textBig ? AppModel.bigScale : 1; applyVoice(); applyTr()
+        UIApplication.shared.isIdleTimerDisabled = keepAwake
         // только для снимков в облачной сборке: «-demoUI YES» (пример разговора), «-demoRec YES» (идёт запись),
         // «-demoFlow YES» (три фразы «как вживую» — для видео, плавно ли перестраивается экран),
         // «-demoMany YES» (длинная лента — для проверки свайпов настоящими касаниями, см. UITests)
         let ud = UserDefaults.standard
         if ud.bool(forKey: "demoUI") || ud.bool(forKey: "demoRec") || ud.bool(forKey: "demoFlow") || ud.bool(forKey: "demoMany") || ud.bool(forKey: "demoBusy") || ud.bool(forKey: "demoLocked") {
-            loggedIn = true
+            loggedIn = true; voice.demo = true
+            if ud.bool(forKey: "demoBig") { T.scale = AppModel.bigScale }   // «-demoBig YES» — крупный текст на снимке
             items = [Item(mine: true, src: "ru", to: "id", text: "Здравствуйте, сколько стоит аренда байка на неделю?", out: "Halo, berapa sewa motor seminggu?"),
                      Item(mine: false, src: "id", to: "ru", text: "Untuk seminggu 700 ribu, sudah termasuk helm.", out: "За неделю 700 тысяч, шлем включён."),
                      Item(mine: false, src: "id", to: "ru", text: "Bisa, jam delapan sudah buka.", out: "Да, в восемь мы уже открыты.")]
@@ -105,6 +132,8 @@ struct Item: Identifiable, Codable, Equatable {
         voice.blocked = { [weak self] in self?.recording ?? false }
         warm()
         Log.launch()
+        Log.send("prefs", ["speakThem": speakThem, "speed": voiceSpeed, "female": voiceFemale, "out": output, "orb": orbMode, "autoStop": autoStop,
+                           "haptics": haptics, "big": textBig, "theme": theme, "awake": keepAwake, "draft": showDraft, "casual": casual, "words": words.count, "keep": keep])
         if loggedIn { Audio.setup(); mic.warm() }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in guard let self, self.loggedIn else { return }; Audio.setup(); self.mic.warm() }
@@ -138,7 +167,22 @@ struct Item: Identifiable, Codable, Equatable {
     // MARK: история
     private var file: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("history.json") }
     private func load() { if let d = try? Data(contentsOf: file), let h = try? JSONDecoder().decode([Item].self, from: d) { items = h } }
-    func save() { items = Array(items.suffix(60)); try? JSONEncoder().encode(items.filter { !$0.draft }).write(to: file) }
+    func save() {
+        let cap = keep == 0 ? 60 : keep
+        if items.count > cap { items = Array(items.suffix(cap)) }
+        if keep == 0 { try? FileManager.default.removeItem(at: file); return }   // «не хранить»: разговор живёт, пока открыто приложение
+        try? JSONEncoder().encode(items.filter { !$0.draft }).write(to: file)
+    }
+    /// Весь разговор текстом — «Выгрузить разговор» в настройках.
+    var exportText: String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "ru_RU"); f.dateFormat = "d MMM, HH:mm"
+        var s = "Разговор в Tapny\n"
+        for it in items where !it.draft {
+            let who = it.mine ? "Я" : it.photo ? "Фото" : "Собеседник"
+            s += "\n" + f.string(from: it.date) + " · " + who + "\n" + (it.photo ? "" : it.text + "\n") + "→ " + it.out + "\n"
+        }
+        return s
+    }
     func clear() { items = []; save() }
     func remove(_ it: Item) {
         guard let i = items.firstIndex(where: { $0.id == it.id }) else { return }
@@ -174,7 +218,7 @@ struct Item: Identifiable, Codable, Equatable {
         guard loggedIn, !recording, !arming, let k = Shared.token else { return }
         let spoke = voice.playingId != nil   // только что звучал перевод — звук «до нажатия» не берём, там наш же голос
         voice.stop()
-        tapOn.impactOccurred(intensity: 0.9)   // сразу на касание, не дожидаясь микрофона
+        if haptics { tapOn.impactOccurred(intensity: 0.9) }   // сразу на касание, не дожидаясь микрофона
         arming = true; toggleMode = toggle; weakNet = false
         liveText = ""; liveDraft = ""; draftText = ""; liveLang = ""; liveId = UUID()
         let s: LiveSession
@@ -189,7 +233,7 @@ struct Item: Identifiable, Codable, Equatable {
         }
         if !mic.running { Audio.setup() }
         do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
-        arming = false; phrase = true; recording = true; recStart = Date()
+        arming = false; phrase = true; recording = true; recStart = Date(); lastLoud = recStart; lastWord = recStart
         tapOff.prepare()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите · ↑ закрепить · ← отмена"
     }
@@ -200,7 +244,7 @@ struct Item: Identifiable, Codable, Equatable {
         recording = false; phrase = false; toggleMode = false
         liveText = ""; liveDraft = ""
         mic.stop(); session?.close(); session = nil
-        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        Hap.note(.warning)
         hint = "Нажмите и говорите"
         Log.send("cancel", ["recMs": Log.ms(since: recStart)])
         warm()
@@ -209,7 +253,7 @@ struct Item: Identifiable, Codable, Equatable {
     func stopRec() {
         guard recording else { return }
         recording = false
-        if toggleMode { tapOn.impactOccurred(intensity: 0.7) } else { tapOff.impactOccurred(intensity: 0.7) }
+        if haptics { if toggleMode { tapOn.impactOccurred(intensity: 0.7) } else { tapOff.impactOccurred(intensity: 0.7) } }
         let s = session
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in   // хвост последнего слова
             guard let self else { return }
@@ -226,6 +270,7 @@ struct Item: Identifiable, Codable, Equatable {
         guard s === session else { return }
         switch e {
         case .live(let l, let t):
+            if t != liveText { lastWord = Date() }
             liveLang = l; liveText = t
             scheduleDraft()
         case .final(let j):
@@ -240,9 +285,21 @@ struct Item: Identifiable, Codable, Equatable {
         }
     }
 
+    /// Громкость с микрофона: кольца вокруг шара и «закончить по тишине».
+    /// Запись закреплена, слова уже есть, и 2 с тихо — фраза сама уходит на перевод. В шумном месте, где тихо
+    /// не бывает, срабатывает запасное правило: слова не дописываются 5 с.
+    private func heard(_ v: Double) {
+        meter.level = v
+        let now = Date()
+        if v > 0.3 { lastLoud = now }
+        guard autoStop, recording, toggleMode, !liveText.isEmpty else { return }
+        let quiet = now.timeIntervalSince(lastLoud), still = now.timeIntervalSince(lastWord)
+        if (quiet > 2 && still > 1.2) || still > 5 { Log.send("autostop", ["quietMs": Int(quiet * 1000), "stillMs": Int(still * 1000)]); stopRec() }
+    }
+
     /// Черновой перевод раз в ~0,9 с, пока человек говорит.
     private func scheduleDraft() {
-        guard draftTask == nil, liveText.split(separator: " ").count >= 3, liveText != draftText else { return }
+        guard showDraft, draftTask == nil, liveText.split(separator: " ").count >= 3, liveText != draftText else { return }
         let text = liveText, lang = liveLang
         draftText = text
         draftTask = Task {
@@ -302,10 +359,11 @@ struct Item: Identifiable, Codable, Equatable {
 
     func add(_ it: Item) {
         items.append(it); save()
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Hap.note(.success)
         hint = "Нажмите и говорите"
-        if it.mine && autoSpeak { voice.auto(it.id, text: it.out, lang: it.to) }
-        else { voice.prefetch(it.out, lang: it.mine ? it.to : "ru") }
+        let lang = it.mine ? it.to : "ru"
+        if it.mine ? autoSpeak : (speakThem && !it.photo) { voice.auto(it.id, text: it.out, lang: lang) }
+        else { voice.prefetch(it.out, lang: lang) }
     }
 
     // MARK: текст, фото, «наоборот»

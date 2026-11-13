@@ -6,6 +6,10 @@ enum Api {
     struct Fail: Error, LocalizedError { let message: String; var errorDescription: String? { message } }
 
     static var key: String? { Shared.token }
+    // из настроек: уходят на сервер с каждым переводом и голосом
+    static var tone = ""                 // "casual" — по-простому, на «ты»; пусто — вежливо
+    static var gl: [[String]] = []       // «Мои слова»: [[слово, как переводить]]
+    static var female = false            // женский голос
 
     static func request(_ path: String, query: [URLQueryItem] = [], body: Data? = nil, type: String = "application/json",
                         key: String? = nil, timeout: TimeInterval = 20) async throws -> Data {
@@ -51,6 +55,8 @@ enum Api {
         var b: [String: Any] = ["text": text, "to": to]
         if let force { b["force"] = force }
         if draft { b["draft"] = true }
+        if !tone.isEmpty { b["tone"] = tone }
+        if !gl.isEmpty { b["gl"] = gl }
         guard let t = parseTr(try await json("/api/tr", b, timeout: draft ? 8 : 20)) else { throw Fail(message: "Не получилось перевести") }
         return t
     }
@@ -70,7 +76,8 @@ enum Api {
     }
 
     static func voice(_ text: String, lang: String) async throws -> Data {
-        try await request("/api/tts", query: [URLQueryItem(name: "v", value: "8"), URLQueryItem(name: "l", value: lang),
-                                              URLQueryItem(name: "q", value: String(text.prefix(1000)))], timeout: 15)
+        var q = [URLQueryItem(name: "v", value: "8"), URLQueryItem(name: "l", value: lang), URLQueryItem(name: "q", value: String(text.prefix(1000)))]
+        if female { q.append(URLQueryItem(name: "g", value: "f")) }
+        return try await request("/api/tts", query: q, timeout: 15)
     }
 }

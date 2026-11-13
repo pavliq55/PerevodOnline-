@@ -96,27 +96,124 @@ struct ConversationView: View {
     }
 }
 
+/// Настройки. Всё применяется сразу и хранится на айфоне; тон, «Мои слова» и женский голос уходят на сервер с каждой фразой.
 struct SettingsView: View {
     @EnvironmentObject var m: AppModel
     @Environment(\.dismiss) var dismiss
     @State private var prep = false
+    // «-demoSettings 1…3» — снимки в облачной сборке: верх списка, низ списка, «Мои слова»
+    private let demo = UserDefaults.standard.integer(forKey: "demoSettings")
+    @State private var demoWords = UserDefaults.standard.integer(forKey: "demoSettings") == 3
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section { Toggle("Сразу озвучивать мои фразы", isOn: $m.autoSpeak) } footer: { Text("Перевод звучит сам, без нажатия «Озвучить».") }
-                Section {
-                    Button("Скачать перевод без интернета") { prep = true }
-                } footer: { Text("Пакеты Apple для русского и языка собеседника — потом перевод работает даже без связи.") }
-                Section {
-                    Button("Очистить разговор", role: .destructive) { m.clear() }
-                    Link("Политика приватности", destination: URL(string: "https://perevod.molly-trade.workers.dev/privacy")!)
+            ScrollViewReader { proxy in
+                Form {
+                    sound
+                    orb
+                    screen
+                    translation
+                    history
+                    Section {
+                        Link("Политика приватности", destination: URL(string: "https://perevod.molly-trade.workers.dev/privacy")!)
+                        Button("Выйти", role: .destructive) { m.logout(); dismiss() }.id("end")
+                    } footer: {
+                        Text("Tapny · альфа \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""))")
+                    }
                 }
-                Section { Button("Выйти", role: .destructive) { m.logout(); dismiss() } } footer: {
-                    Text("Tapny · альфа \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")") }
+                .onAppear { if demo == 2 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { proxy.scrollTo("end", anchor: .bottom) } } }
             }
             .navigationTitle("Настройки").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
+            .navigationDestination(isPresented: $demoWords) { WordsView() }
             .sheet(isPresented: $prep) { OfflinePrepView().presentationDetents([.medium]) }
+        }
+    }
+
+    private var sound: some View {
+        Section {
+            Toggle("Сразу озвучивать мои фразы", isOn: $m.autoSpeak)
+            Toggle("Озвучивать собеседника", isOn: $m.speakThem)
+            Picker("Скорость голоса", selection: $m.voiceSpeed) { Text("Медленнее").tag(0); Text("Обычно").tag(1); Text("Быстрее").tag(2) }
+            Picker("Голос", selection: $m.voiceFemale) { Text("Мужской").tag(false); Text("Женский").tag(true) }
+            Picker("Куда звучит", selection: $m.output) { Text("Авто").tag(0); Text("Динамик").tag(1); Text("К уху").tag(2) }
+        } header: { Text("Голос и звук") } footer: {
+            Text("Авто — в наушники, если они подключены, иначе в громкий динамик. «Динамик» — всегда вслух, даже с наушниками. «К уху» — тихо, как при звонке.")
+        }
+    }
+
+    private var orb: some View {
+        Section {
+            Picker("Шар", selection: $m.orbMode) { Text("Держать или нажать").tag(0); Text("Только держать").tag(1); Text("Только нажать").tag(2) }
+            Toggle("Заканчивать по тишине", isOn: $m.autoStop)
+            Toggle("Вибрация", isOn: $m.haptics)
+        } header: { Text("Шар и запись") } footer: {
+            Text("По тишине: запись закреплена (нажали шар или потянули его вверх), вы замолчали на 2 секунды — фраза сама уходит на перевод.")
+        }
+    }
+
+    private var screen: some View {
+        Section {
+            Picker("Размер текста", selection: $m.textBig) { Text("Обычный").tag(false); Text("Крупный").tag(true) }
+            Picker("Тема", selection: $m.theme) { Text("Как в айфоне").tag(0); Text("Светлая").tag(1); Text("Тёмная").tag(2) }
+            Toggle("Не гасить экран", isOn: $m.keepAwake)
+            Toggle("Черновой перевод, пока говорю", isOn: $m.showDraft)
+        } header: { Text("Экран") }
+    }
+
+    private var translation: some View {
+        Section {
+            Picker("Тон", selection: $m.casual) { Text("Вежливо").tag(false); Text("По-простому").tag(true) }
+            NavigationLink { WordsView() } label: { LabeledContent("Мои слова", value: m.words.isEmpty ? "нет" : "\(m.words.count)") }
+            Button("Скачать перевод без интернета") { prep = true }
+        } header: { Text("Перевод") } footer: {
+            Text("Тон — как обращаться к собеседнику: на «вы» или по-дружески. Мои слова — имена и названия, которые надо переводить по-вашему. Без интернета — пакеты Apple для русского и языка собеседника.")
+        }
+    }
+
+    private var history: some View {
+        Section {
+            Picker("Хранить", selection: $m.keep) { Text("60 фраз").tag(60); Text("300 фраз").tag(300); Text("Не хранить").tag(0) }
+            ShareLink(item: m.exportText) { Text("Выгрузить разговор") }.disabled(m.items.isEmpty)
+            Button("Очистить разговор", role: .destructive) { m.clear() }
+        } header: { Text("История") } footer: {
+            Text("«Не хранить» — разговор виден, пока приложение открыто, и на айфон не записывается.")
+        }
+    }
+}
+
+/// «Мои слова»: имена, названия и слова, которые надо переводить по-своему. Уходят на сервер с каждой фразой.
+struct WordsView: View {
+    @EnvironmentObject var m: AppModel
+    @State private var list: [Word] = []
+    private static let demo = UserDefaults.standard.integer(forKey: "demoSettings") == 3
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach($list) { $w in
+                    HStack(spacing: 10) {
+                        TextField("Слово", text: $w.a)
+                        Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(T.dim)
+                        TextField("Как переводить", text: $w.b)
+                    }
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                }
+                .onDelete { list.remove(atOffsets: $0) }
+                if list.count < 40 { Button { list.append(Word()) } label: { Label("Добавить слово", systemImage: "plus") } }
+            } footer: {
+                Text("Слева — как вы говорите, справа — как переводить. Например: «Маша → Mbak Masha», «Чангу → Canggu». Правое поле пустое — слово останется как есть. Убрать строку — смахните её влево.")
+            }
+        }
+        .navigationTitle("Мои слова").navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            list = m.words
+            if Self.demo, list.isEmpty { list = [Word(a: "Маша", b: "Mbak Masha"), Word(a: "Чангу", b: "Canggu"), Word(a: "Tapny", b: "")] }
+        }
+        .onDisappear {
+            func clean(_ x: String) -> String { x.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let new = list.map { Word(id: $0.id, a: clean($0.a), b: clean($0.b)) }.filter { !$0.a.isEmpty }
+            if !Self.demo, new != m.words { m.words = new }
         }
     }
 }
@@ -185,6 +282,12 @@ struct NativeRoot: View {
         .onReceive(NotificationCenter.default.publisher(for: PendingAction.note)) { _ in
             if let a = PendingAction.take() { m.handle(action: a) }
         }
-        .onAppear { if let a = PendingAction.take() { m.handle(action: a) } }
+        .onAppear {
+            if let a = PendingAction.take() { m.handle(action: a) }
+            // тема из настроек; «-demoTheme N» — только для снимка в облачной сборке
+            let demo = UserDefaults.standard.integer(forKey: "demoTheme")
+            let th = demo > 0 ? demo : m.theme
+            Look.apply(th); DispatchQueue.main.async { Look.apply(th) }
+        }
     }
 }

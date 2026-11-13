@@ -42,8 +42,8 @@ final class Gestures: XCTestCase {
         step("1 чуть влево и отпустить — должна вернуться")
         drag(last.midX, last.midY - 20, dx: -60, speed: 200); sleep(1)
 
-        step("2 вправо — озвучить, вернуться")
-        drag(last.midX - 40, last.midY - 20, dx: 150, speed: 300); sleep(2)
+        step("2 вправо — озвучить: реплика сразу едет на место, кнопка «Готовлю…» → «Стоп» → «Озвучить»")
+        drag(last.midX - 40, last.midY - 20, dx: 150, speed: 300); sleep(5)
 
         step("2б потянуть ленту вверх за край и отпустить — перевод на весь экран; смахнуть вниз — закрыть")
         big(w, h)
@@ -90,6 +90,19 @@ final class Gestures: XCTestCase {
         app.terminate()
         app.launchArguments = ["-demoFlow", "YES", "-consent_v1", "YES"]
         app.launch(); sleep(25)
+        step("14 настройки: открыть, пролистать до конца, закрыть")
+        app.terminate()
+        app.launchArguments = ["-demoMany", "YES", "-consent_v1", "YES"]
+        app.launch(); sleep(3)
+        let set = app.buttons["Настройки"]
+        if set.waitForExistence(timeout: 3) {
+            set.tap(); sleep(2)
+            drag(w / 2, h * 0.7, dx: 0, dy: -420, speed: 600); sleep(1)
+            drag(w / 2, h * 0.7, dx: 0, dy: -420, speed: 600); sleep(2)
+            let done = app.buttons["Готово"]
+            if done.exists { done.tap() } else { XCTFail("нет «Готово»") }
+            sleep(1)
+        } else { XCTFail("нет кнопки настроек") }
         step("конец")
     }
 }

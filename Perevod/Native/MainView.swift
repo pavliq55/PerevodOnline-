@@ -5,7 +5,7 @@ struct MainView: View {
     @EnvironmentObject var m: AppModel
     @ObservedObject var voice: Voice
     @State private var showLangs = false
-    @State private var showSettings = false
+    @State private var showSettings = UserDefaults.standard.integer(forKey: "demoSettings") > 0   // «-demoSettings N» — снимок настроек в облачной сборке
     @State private var showType = false
     @State private var showConv = false
     @State private var full: Item?
@@ -15,6 +15,7 @@ struct MainView: View {
     @State private var showLibrary = false
     @State private var tail: UUID?             // последняя реплика, которую лента уже показала
     @State private var pull = PullUp()         // лента потянута вверх за нижний край
+    @State private var shown = 60              // сколько последних реплик в ленте; остальные — по кнопке «Показать раньше»
 
     var body: some View {
         ZStack {
@@ -53,7 +54,7 @@ struct MainView: View {
             Spacer()
             GlassGroup { HStack(spacing: 4) {
                 Button { showConv = true } label: { Image(systemName: "rectangle.split.1x2").frame(width: 46, height: 46) }
-                Button { showSettings = true } label: { Image(systemName: "slider.horizontal.3").frame(width: 46, height: 46) }
+                Button { showSettings = true } label: { Image(systemName: "slider.horizontal.3").frame(width: 46, height: 46) }.accessibilityLabel("Настройки")
             }.font(.system(size: 17, weight: .medium)).foregroundStyle(T.ink).padding(.horizontal, 4).frame(height: 50).glass(Capsule(), clear: true) }
         }
         .padding(.horizontal, 16).padding(.top, 4)
@@ -68,6 +69,16 @@ struct MainView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Color.clear.frame(height: 66)
                     if m.items.isEmpty && !m.phrase { empty }
+                    if m.items.count > shown {
+                        Button {
+                            let top = slots.first?.id
+                            shown += 60
+                            DispatchQueue.main.async { if let top { proxy.scrollTo(top, anchor: .top) } }   // остаёмся на той же реплике
+                        } label: {
+                            Text("Показать раньше").font(T.label).foregroundStyle(T.ink).padding(.horizontal, 14).frame(height: 32).background(Capsule().fill(T.field))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
                     ForEach(slots) { it in
                         let live = m.phrase && it.id == m.liveId
                         SwipeRow(off: live, onDelete: { withAnimation(.smooth(duration: 0.32)) { m.remove(it) } },
@@ -114,7 +125,7 @@ struct MainView: View {
 
     private var empty: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Держите шар и говорите").font(T.big(20)).foregroundStyle(T.ink)
+            Text(m.orbMode == 2 ? "Нажмите шар и говорите" : "Держите шар и говорите").font(T.big(20)).foregroundStyle(T.ink)
             Text("Вы — по-русски, собеседник — на своём. Кто говорит, Tapny поймёт сам.").font(T.text).foregroundStyle(T.dim)
         }.padding(.top, 40).padding(.horizontal, 8)
     }
@@ -145,8 +156,9 @@ struct MainView: View {
     /// Реплики и, пока говорят, «живое» облако в конце. У него тот же номер, что получит готовая реплика:
     /// слова сразу пишутся в облаке, а когда перевод готов, облако остаётся на месте — меняется только то, что внутри.
     private var slots: [Item] {
-        guard m.phrase, !m.items.contains(where: { $0.id == m.liveId }) else { return m.items }
-        return m.items + [Item(id: m.liveId, mine: m.liveLang.isEmpty || m.liveLang == "ru", src: "", to: m.to, text: "", out: "")]
+        let last = m.items.count > shown ? Array(m.items.suffix(shown)) : m.items
+        guard m.phrase, !m.items.contains(where: { $0.id == m.liveId }) else { return last }
+        return last + [Item(id: m.liveId, mine: m.liveLang.isEmpty || m.liveLang == "ru", src: "", to: m.to, text: "", out: "")]
     }
 
     /// Одно облако на всю жизнь реплики: пока говорят → готовый перевод крупно → обычная реплика выше.
@@ -178,7 +190,7 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
             if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
             HStack(spacing: 8) {
-                chip("doc.on.doc") { UIPasteboard.general.string = it.out; UINotificationFeedbackGenerator().notificationOccurred(.success) }
+                chip("doc.on.doc") { UIPasteboard.general.string = it.out; Hap.note(.success) }
                 if !it.photo { chip("arrow.triangle.2.circlepath") { Task { await m.flip(it) } } }
                 Spacer()
                 Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
@@ -215,9 +227,11 @@ struct MainView: View {
             } else { label(it) }
             // место под две строки текста и черновик занято заранее: пока говорят, слова дописываются, а облако стоит
             Text(m.liveText.isEmpty ? "…" : m.liveText).font(T.live).foregroundStyle(T.ink).tracking(-0.5)
-                .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
-            Text(m.liveDraft.isEmpty ? " " : m.liveDraft).font(T.text).foregroundStyle(T.dim)
-                .frame(maxWidth: .infinity, minHeight: 22, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: 64 * T.scale, alignment: .topLeading)
+            if m.showDraft {
+                Text(m.liveDraft.isEmpty ? " " : m.liveDraft).font(T.text).foregroundStyle(T.dim)
+                    .frame(maxWidth: .infinity, minHeight: 22 * T.scale, alignment: .topLeading)
+            }
         }
         .transaction(value: m.liveText) { $0.animation = nil }
         .transaction(value: m.liveDraft) { $0.animation = nil }
@@ -295,7 +309,7 @@ private struct PullHint: View {
             .scaleEffect(armed ? 1.06 : 0.94).animation(.spring(duration: 0.25), value: armed)
             .opacity(Double(min(max(pull.v - 10, 0) / 30, 1))).animation(.easeOut(duration: 0.15), value: pull.v == 0)
             .padding(.top, 8)
-            .onChange(of: armed) { _, a in if a { UIImpactFeedbackGenerator(style: .medium).impactOccurred() } }
+            .onChange(of: armed) { _, a in if a { Hap.impact() } }
             .allowsHitTesting(false).accessibilityHidden(true)
     }
 }
@@ -330,7 +344,7 @@ struct MicOrb: View {
         .onChange(of: m.hint) { _, h in
             if ["Не расслышал", "Слишком коротко", "Нет связи", "Не получилось", "Микрофон не включился"].contains(where: { h.hasPrefix($0) }) {
                 withAnimation(.easeOut(duration: 0.45)) { failTick += 1 }
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                Hap.note(.error)
             }
         }
         .offset(pull).animation(.spring(duration: 0.25), value: pull)
@@ -339,7 +353,9 @@ struct MicOrb: View {
             .onChanged { v in
                 if !pressed {
                     pressed = true; pressAt = v.time; locked = false   // время самого касания: если запуск записи задержится, касание не станет «удержанием»
-                    if m.recording { m.stopRec(); ignoreEnd = true } else { m.startRec() }
+                    if m.recording { m.stopRec(); ignoreEnd = true }
+                    else if m.orbMode == 2 { m.startRec(toggle: true); ignoreEnd = true }   // «только нажать»: нажал — говорю, нажал ещё раз — готово
+                    else { m.startRec() }
                     return
                 }
                 // палец держит шар и ведёт: вверх — закрепить запись, в сторону — отменить фразу
@@ -348,7 +364,7 @@ struct MicOrb: View {
                 pull = CGSize(width: max(min(t.width, 70), -70) * 0.3, height: max(min(t.height, 0), -80) * 0.3)
                 if t.height < -70, abs(t.width) < 60 {
                     locked = true; pull = .zero; m.toggleMode = true; m.hint = "Говорите… закреплено, нажмите, чтобы закончить"
-                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                    Hap.impact(.rigid)
                 } else if abs(t.width) > 100, t.height > -60 {
                     ignoreEnd = true; pull = .zero; m.cancelRec()
                 }
@@ -357,7 +373,8 @@ struct MicOrb: View {
                 pressed = false; pull = .zero
                 if ignoreEnd { ignoreEnd = false; return }
                 if locked { locked = false; return }
-                if v.time.timeIntervalSince(pressAt) < 0.35 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить"; UISelectionFeedbackGenerator().selectionChanged() }
+                // короткое касание закрепляет запись; в режиме «только держать» — нет, фраза просто заканчивается
+                if v.time.timeIntervalSince(pressAt) < 0.35, m.orbMode != 1 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить"; Hap.select() }
                 else { m.stopRec() }
             })
         .accessibilityLabel(m.recording ? "Закончить фразу" : "Говорить")
@@ -602,11 +619,13 @@ private struct SwipeRow<Content: View>: View {
                 if let v, dx <= Self.del || (dx < -20 && dx + v * 0.12 <= Self.del) {   // дотянул до корзины или смахнул быстрым движением
                     withAnimation(.easeOut(duration: 0.2)) { gone = true; dx = -520 } completion: { onDelete() }
                 } else {
-                    if v != nil, dx >= Self.say { onSpeak() }
+                    // сначала реплика плавно едет на место, озвучка — следом: запуск звука не держит её сдвинутой
+                    let speak = v != nil && dx >= Self.say
                     withAnimation(.spring(duration: 0.4, bounce: 0.18)) { dx = 0 }
+                    if speak { DispatchQueue.main.async { onSpeak() } }
                 }
             }))
-            .onChange(of: armed) { _, a in if a, !gone { UIImpactFeedbackGenerator(style: .medium).impactOccurred() } }
+            .onChange(of: armed) { _, a in if a, !gone { Hap.impact() } }
             .accessibilityElement(children: .contain).accessibilityIdentifier("bubble")
     }
 }

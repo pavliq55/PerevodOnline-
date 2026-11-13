@@ -22,7 +22,11 @@ import UIKit
         let t = URLSession.shared.webSocketTask(with: c.url!)
         task = t
         t.resume()
-        send(json: ["pin": key, "to": to, "enc": "mulaw", "v": Log.v])
+        var hello: [String: Any] = ["pin": key, "to": to, "enc": "mulaw", "v": Log.v]
+        if !Api.tone.isEmpty { hello["tone"] = Api.tone }      // настройки: тон, «Мои слова», женский голос
+        if !Api.gl.isEmpty { hello["gl"] = Api.gl }
+        if Api.female { hello["vg"] = "f" }
+        send(json: hello)
         receive()
     }
 
