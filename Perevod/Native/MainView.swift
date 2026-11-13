@@ -65,7 +65,7 @@ struct MainView: View {
                     ForEach(m.items) { it in
                         if it.id == m.items.last?.id { latest(it) } else { row(it) }
                     }
-                    if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.opacity) }
+                    if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity))   // уходит сразу: на его месте уже готовый перевод }
                     Color.clear.frame(height: 230).id("end")
                 }
                 .padding(.horizontal, 14)
@@ -215,7 +215,7 @@ struct MicOrb: View {
             Orb(glow: true).frame(width: 86, height: 86)
                 .scaleEffect(m.recording ? (pulse ? 1.1 : 0.96) : pressed ? 0.94 : 1)
                 .animation(m.recording ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .spring(duration: 0.25), value: pulse)
-            Image(systemName: m.recording ? "stop.fill" : m.busy ? "ellipsis" : "mic.fill")
+            Image(systemName: m.recording ? "stop.fill" : m.busy || m.phrase ? "ellipsis" : "mic.fill")
                 .font(.system(size: m.recording ? 24 : 28, weight: .semibold)).foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.25), radius: 2)   // белый значок на жёлтом краю шара иначе теряется
                 .symbolEffect(.pulse, isActive: m.busy)
