@@ -71,7 +71,8 @@ struct Item: Identifiable, Codable, Equatable {
     private var draftTask: Task<Void, Never>?
     private var draftText = ""
     private var expectVoice: (text: String, lang: String)?   // голос, который сервер пришлёт следом за переводом
-    private let haptic = UIImpactFeedbackGenerator(style: .light)
+    private let tapOn = UIImpactFeedbackGenerator(style: .medium)   // нажал шар
+    private let tapOff = UIImpactFeedbackGenerator(style: .soft)    // отпустил — мягче, чтобы начало и конец различались рукой
 
     init() {
         load(); big = items.last?.id
@@ -173,6 +174,7 @@ struct Item: Identifiable, Codable, Equatable {
         guard loggedIn, !recording, !arming, let k = Shared.token else { return }
         let spoke = voice.playingId != nil   // только что звучал перевод — звук «до нажатия» не берём, там наш же голос
         voice.stop()
+        tapOn.impactOccurred(intensity: 0.9)   // сразу на касание, не дожидаясь микрофона
         arming = true; toggleMode = toggle; weakNet = false
         liveText = ""; liveDraft = ""; draftText = ""; liveLang = ""; liveId = UUID()
         let s: LiveSession
@@ -188,7 +190,7 @@ struct Item: Identifiable, Codable, Equatable {
         if !mic.running { Audio.setup() }
         do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
         arming = false; phrase = true; recording = true; recStart = Date()
-        haptic.impactOccurred()
+        tapOff.prepare()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите · ↑ закрепить · ← отмена"
     }
 
@@ -207,7 +209,7 @@ struct Item: Identifiable, Codable, Equatable {
     func stopRec() {
         guard recording else { return }
         recording = false
-        haptic.impactOccurred(intensity: 0.6)
+        if toggleMode { tapOn.impactOccurred(intensity: 0.7) } else { tapOff.impactOccurred(intensity: 0.7) }
         let s = session
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in   // хвост последнего слова
             guard let self else { return }

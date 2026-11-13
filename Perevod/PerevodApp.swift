@@ -48,6 +48,7 @@ enum Audio {
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playAndRecord, mode: .default,
                            options: [.defaultToSpeaker, .allowBluetoothA2DP])
+        try? s.setAllowHapticsAndSystemSoundsDuringRecording(true)   // иначе при включённом микрофоне айфон глушит всю вибрацию
         try? s.setActive(true)
     }
 }

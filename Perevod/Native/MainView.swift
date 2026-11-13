@@ -309,6 +309,7 @@ struct MicOrb: View {
     @State private var locked = false          // потянули вверх — запись закреплена, палец можно убрать
     @State private var pull = CGSize.zero      // шар чуть тянется за пальцем
     @State private var doneTick = 0            // перевод готов — от шара уходит одна волна
+    @State private var sentTick = 0            // отпустили — от шара уходит волна «ушло на перевод»
     @State private var failTick = 0            // не получилось — шар качнётся
 
     private var phase: OrbPhase {
@@ -322,12 +323,14 @@ struct MicOrb: View {
         ZStack { LiveOrb(meter: m.meter, phase: ph); OrbGlyph(phase: ph) }
         .overlay(OrbRim(phase: ph, start: m.recStart))   // внутри стекла: поверх стекла рисунок не виден
         .padding(8).glass(Circle(), clear: true)
-        .background(OrbHalo(meter: m.meter, phase: ph, doneTick: doneTick))
+        .background(OrbHalo(meter: m.meter, phase: ph, doneTick: doneTick, sentTick: sentTick))
         .modifier(Shake(t: CGFloat(failTick)))
         .onChange(of: m.big) { _, _ in if !m.recording { doneTick += 1 } }
+        .onChange(of: m.recording) { _, r in if !r, m.phrase { sentTick += 1 } }
         .onChange(of: m.hint) { _, h in
             if ["Не расслышал", "Слишком коротко", "Нет связи", "Не получилось", "Микрофон не включился"].contains(where: { h.hasPrefix($0) }) {
                 withAnimation(.easeOut(duration: 0.45)) { failTick += 1 }
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
         }
         .offset(pull).animation(.spring(duration: 0.25), value: pull)
@@ -345,7 +348,7 @@ struct MicOrb: View {
                 pull = CGSize(width: max(min(t.width, 70), -70) * 0.3, height: max(min(t.height, 0), -80) * 0.3)
                 if t.height < -70, abs(t.width) < 60 {
                     locked = true; pull = .zero; m.toggleMode = true; m.hint = "Говорите… закреплено, нажмите, чтобы закончить"
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 } else if abs(t.width) > 100, t.height > -60 {
                     ignoreEnd = true; pull = .zero; m.cancelRec()
                 }
@@ -354,7 +357,7 @@ struct MicOrb: View {
                 pressed = false; pull = .zero
                 if ignoreEnd { ignoreEnd = false; return }
                 if locked { locked = false; return }
-                if v.time.timeIntervalSince(pressAt) < 0.35 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить" }
+                if v.time.timeIntervalSince(pressAt) < 0.35 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить"; UISelectionFeedbackGenerator().selectionChanged() }
                 else { m.stopRec() }
             })
         .accessibilityLabel(m.recording ? "Закончить фразу" : "Говорить")
@@ -462,51 +465,68 @@ private struct OrbGlyph: View {
     }
 }
 
-/// Свет за стеклом: ореол в такт голосу, рябь, пока слушает, и одна волна, когда перевод готов.
+/// Свет за стеклом — отзывается на голос: ближнее кольцо у кромки стекла, дальнее расходится с запозданием («капля разошлась»),
+/// под ними цветной ореол. В тишине ближнее кольцо тихо дышит. Отпустили — уходит одна волна; перевод готов — ещё одна.
 private struct OrbHalo: View {
     @ObservedObject var meter: Meter
     var phase: OrbPhase
     var doneTick: Int
+    var sentTick: Int
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var calm
-    private static let colors = [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4), Color(red: 0.95, green: 0.55, blue: 0.72),
-                                 Color(red: 0.72, green: 0.61, blue: 1), Color(red: 1, green: 0.79, blue: 0.24)]
+    private static let glow = [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4), Color(red: 0.95, green: 0.55, blue: 0.72),
+                               Color(red: 0.72, green: 0.61, blue: 1), Color(red: 1, green: 0.79, blue: 0.24)]
+    // на светлом персиковом фоне жёлтый и персик теряются — там кольца гуще: оранжевый, малина, фиолет
+    private static let deep = [Color(red: 1, green: 0.48, blue: 0.18), Color(red: 0.93, green: 0.36, blue: 0.62), Color(red: 0.56, green: 0.42, blue: 1),
+                               Color(red: 1, green: 0.48, blue: 0.18)]
+    private static let far = Animation.spring(response: 0.30, dampingFraction: 0.55)
+    private static let near = Animation.spring(response: 0.16, dampingFraction: 0.60)
     var body: some View {
         let rec = phase == .listening || phase == .locked
-        let l = rec ? meter.level : 0
         let dark = scheme == .dark
-        // на светлом персиковом фоне цветной свет не виден — там он белый; в тёмной теме — цвета шара
-        let light: AnyShapeStyle = dark ? AnyShapeStyle(AngularGradient(colors: Self.colors, center: .center)) : AnyShapeStyle(Color.white)
+        // ниже 0.12 — шум комнаты, его кольца не замечают; обычная речь даёт 0.45…1
+        let e = rec ? min(max((meter.level - 0.12) / 0.70, 0), 1) : 0
+        let k = phase == .locked ? 0.7 : 1.0   // запись закреплена — кольца тише: главное там дуга времени
+        let ink = AngularGradient(colors: dark ? Self.glow : Self.deep, center: .center)
+        let rest: Double = phase == .thinking ? 0.15 : dark ? 0.3 : 0   // ореол, когда не слушаем
         ZStack {
-            Circle().fill(light).frame(width: 102, height: 102).blur(radius: 18)
-                .scaleEffect(CGFloat(rec ? 1.04 + 0.3 * l : (phase == .thinking ? 0.9 : 1.0)))
-                .opacity(rec ? 0.4 + 0.5 * l : (dark && phase != .thinking ? 0.36 : 0))
-                .animation(.spring(response: 0.3, dampingFraction: 0.85), value: l)
+            Circle().fill(ink).frame(width: 124, height: 124).blur(radius: 18)
+                .scaleEffect(CGFloat(1 + 0.22 * e * k))
+                .opacity(rec ? 0.12 + 0.38 * e : rest)
+                .animation(Self.far, value: e)
                 .animation(.easeInOut(duration: 0.45), value: phase)
-            TimelineView(.animation(paused: !rec || calm)) { c in
-                Canvas { ctx, size in
-                    let t = c.date.timeIntervalSinceReferenceDate
-                    let mid = CGPoint(x: size.width / 2, y: size.height / 2)
-                    let ink: GraphicsContext.Shading = dark ? .conicGradient(Gradient(colors: Self.colors), center: mid) : .color(.white)
-                    for i in 0..<2 {
-                        let p = (t / 2.6 + Double(i) * 0.5).truncatingRemainder(dividingBy: 1)   // жизнь волны 0…1
-                        let r = CGFloat(51 + 28 * p)                                             // от кромки стекла наружу
-                        ctx.opacity = sin(p * .pi) * (1 - p) * 1.2                               // рождается и гаснет прозрачной
-                        ctx.stroke(Path(ellipseIn: CGRect(x: mid.x - r, y: mid.y - r, width: r * 2, height: r * 2)),
-                                   with: ink, lineWidth: CGFloat(2 - 1.2 * p))
-                    }
+            Group {
+                Circle().strokeBorder(ink, lineWidth: 2).frame(width: 106, height: 106)
+                    .scaleEffect(CGFloat(1 + 0.42 * e * k))
+                    .opacity(0.75 * e)
+                    .animation(Self.far, value: e)
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !rec || calm)) { c in
+                    let breath = 0.015 * sin(c.date.timeIntervalSinceReferenceDate * 2 * .pi / 2.4)
+                    Circle().strokeBorder(ink, lineWidth: 3.5).frame(width: 106, height: 106)
+                        .background { if dark { Circle().strokeBorder(ink, lineWidth: 3.5).blur(radius: 6) } }
+                        .scaleEffect(CGFloat(1 + breath))
+                        .transaction { $0.animation = nil }
                 }
+                .frame(width: 106, height: 106)
+                .scaleEffect(CGFloat(1 + 0.18 * e * k))
+                .opacity(rec ? 0.35 + 0.65 * e : 0)
+                .animation(Self.near, value: e)
+                .animation(.easeOut(duration: 0.25), value: rec)
             }
-            .frame(width: 164, height: 164)
-            .opacity(rec ? 1 : 0).animation(.easeInOut(duration: 0.4), value: rec)
-            Circle().strokeBorder(light, lineWidth: 2).frame(width: 102, height: 102)
-                .phaseAnimator([0, 1, 2], trigger: doneTick) { v, p in
-                    v.scaleEffect(p == 2 ? 1.45 : 1).opacity(p == 1 ? 0.9 : 0)
-                } animation: { p in
-                    p == 1 ? Animation.easeOut(duration: 0.1) : p == 2 ? Animation.easeOut(duration: 0.65) : Animation.linear(duration: 0.01)
-                }
+            .blendMode(dark ? .plusLighter : .normal)
+            wave(ink, tick: sentTick, to: 1.55, peak: 0.6, dur: 0.45)
+            wave(ink, tick: doneTick, to: 1.45, peak: 0.9, dur: 0.65)
         }
         .allowsHitTesting(false)
+    }
+
+    private func wave(_ ink: AngularGradient, tick: Int, to: CGFloat, peak: Double, dur: Double) -> some View {
+        Circle().strokeBorder(ink, lineWidth: 2).frame(width: 106, height: 106)
+            .phaseAnimator([0, 1, 2], trigger: tick) { v, p in
+                v.scaleEffect(p == 2 ? to : 1).opacity(p == 1 ? peak : 0)
+            } animation: { p in
+                p == 1 ? Animation.easeOut(duration: 0.08) : p == 2 ? Animation.easeOut(duration: dur) : Animation.linear(duration: 0.01)
+            }
     }
 }
 
