@@ -196,9 +196,13 @@ struct MainView: View {
             Button { showLangs = true } label: {
                 HStack(spacing: 12) {
                     Text("Русский"); Image(systemName: "arrow.left.arrow.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(T.dim)
-                    Text(m.lang.title)
+                    Text(m.lang.title).contentTransition(.opacity)
                 }.font(T.ui).foregroundStyle(T.ink).padding(.horizontal, 22).frame(height: 46)
             }.glass(Capsule(), clear: true)
+            // свайп по полоске — вернуть прошлый язык собеседника
+            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { v in
+                if abs(v.translation.width) > 40, abs(v.translation.width) > abs(v.translation.height) * 1.5 { withAnimation(.spring(duration: 0.3)) { m.swapLang() } }
+            })
             GlassGroup { HStack {
                 Button { showType = true } label: { Image(systemName: "keyboard").font(.system(size: 19)).frame(width: 58, height: 58) }.glass(Circle(), clear: true)
                 Spacer()
@@ -217,6 +221,8 @@ struct MicOrb: View {
     @State private var pressAt = Date()
     @State private var pressed = false
     @State private var ignoreEnd = false
+    @State private var locked = false          // потянули вверх — запись закреплена, палец можно убрать
+    @State private var pull = CGSize.zero      // шар чуть тянется за пальцем
 
     var body: some View {
         ZStack {
@@ -228,16 +234,30 @@ struct MicOrb: View {
         }
         .padding(8).glass(Circle(), clear: true)
         .background(MicRings(meter: m.meter, on: m.recording))
+        .offset(pull).animation(.spring(duration: 0.25), value: pull)
         .contentShape(Circle())
         .gesture(DragGesture(minimumDistance: 0)
             .onChanged { v in
-                guard !pressed else { return }
-                pressed = true; pressAt = v.time   // время самого касания: если запуск записи задержится, касание не станет «удержанием»
-                if m.recording { m.stopRec(); ignoreEnd = true } else { m.startRec() }
+                if !pressed {
+                    pressed = true; pressAt = v.time; locked = false   // время самого касания: если запуск записи задержится, касание не станет «удержанием»
+                    if m.recording { m.stopRec(); ignoreEnd = true } else { m.startRec() }
+                    return
+                }
+                // палец держит шар и ведёт: вверх — закрепить запись, в сторону — отменить фразу
+                guard m.recording, !ignoreEnd, !locked else { return }
+                let t = v.translation
+                pull = CGSize(width: max(min(t.width, 70), -70) * 0.3, height: max(min(t.height, 0), -80) * 0.3)
+                if t.height < -70, abs(t.width) < 60 {
+                    locked = true; pull = .zero; m.toggleMode = true; m.hint = "Говорите… закреплено, нажмите, чтобы закончить"
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                } else if abs(t.width) > 100, t.height > -60 {
+                    ignoreEnd = true; pull = .zero; m.cancelRec()
+                }
             }
             .onEnded { v in
-                pressed = false
+                pressed = false; pull = .zero
                 if ignoreEnd { ignoreEnd = false; return }
+                if locked { locked = false; return }
                 if v.time.timeIntervalSince(pressAt) < 0.35 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить" }
                 else { m.stopRec() }
             })

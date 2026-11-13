@@ -20,7 +20,20 @@ struct Item: Identifiable, Codable, Equatable {
 /// Состояние приложения: история, язык собеседника, запись, онлайн-распознавание, перевод, озвучка.
 @MainActor final class AppModel: ObservableObject {
     @Published var items: [Item] = []
-    @Published var to: String = Shared.partner { didSet { Shared.partner = to; spare?.close(); spare = nil; warm() } }
+    @Published var to: String = Shared.partner {
+        didSet {
+            if oldValue != to { prevTo = oldValue; Shared.defaults.set(oldValue, forKey: "prevTo") }   // прошлый язык — для свайпа по полоске языков
+            Shared.partner = to; spare?.close(); spare = nil; warm()
+        }
+    }
+    private(set) var prevTo = Shared.defaults.string(forKey: "prevTo") ?? ""
+    /// Свайп по полоске языков: вернуться к прошлому языку собеседника.
+    func swapLang() {
+        guard !recording, !prevTo.isEmpty, prevTo != to else { hint = "Выберите второй язык — потом меняйте свайпом"; return }
+        to = prevTo
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        hint = "Нажмите и говорите"
+    }
     @Published var recording = false
     @Published var arming = false              // микрофон включается
     @Published var busy = false                // ждём перевод
@@ -85,7 +98,7 @@ struct Item: Identifiable, Codable, Equatable {
                    (true, "Хорошо, спасибо", "Baik, terima kasih")]
         await nap(4)
         for (mine, text, out) in say {
-            liveText = ""; liveDraft = ""; phrase = true; recording = true; recStart = Date(); hint = "Говорите… отпустите — переведу"
+            liveText = ""; liveDraft = ""; phrase = true; recording = true; recStart = Date(); hint = "Говорите… отпустите · ↑ закрепить · ← отмена"
             var acc = ""
             for (i, w) in text.split(separator: " ").enumerated() {
                 await nap(0.15); meter.level = Double.random(in: 0.2...1); await nap(0.15); meter.level = Double.random(in: 0.1...0.9); acc += (acc.isEmpty ? "" : " ") + w; liveText = acc
@@ -157,7 +170,19 @@ struct Item: Identifiable, Codable, Equatable {
         do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
         arming = false; phrase = true; recording = true; recStart = Date()
         haptic.impactOccurred()
-        hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите — переведу"
+        hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите · ↑ закрепить · ← отмена"
+    }
+
+    /// Смахнули шар в сторону: фразу бросаем, ничего не переводим.
+    func cancelRec() {
+        guard recording else { return }
+        recording = false; phrase = false; toggleMode = false
+        liveText = ""; liveDraft = ""
+        mic.stop(); session?.close(); session = nil
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        hint = "Нажмите и говорите"
+        Log.send("cancel", ["recMs": Log.ms(since: recStart)])
+        warm()
     }
 
     func stopRec() {
