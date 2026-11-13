@@ -130,12 +130,14 @@ struct AuraPreview: View {
 /// Тёплый живой шар (микрофон). В тёмной теме он единственный на полной яркости: блик тише, вокруг — мягкое свечение.
 struct Orb: View {
     var glow = false
+    var spin: Angle = .zero                    // поворот заливки: шар-микрофон медленно «живёт», блик стоит на месте
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         let d = scheme == .dark
         Circle().fill(AngularGradient(colors: [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4),
                                                Color(red: 0.95, green: 0.55, blue: 0.72), Color(red: 0.72, green: 0.61, blue: 1),
                                                Color(red: 1, green: 0.79, blue: 0.24)], center: .center))
+            .rotationEffect(spin)
             .overlay(Circle().fill(RadialGradient(colors: [.white.opacity(d ? 0.42 : 0.7), .clear], center: UnitPoint(x: 0.32, y: 0.28), startRadius: 0, endRadius: 40)))
             .blur(radius: 0.5)
             .shadow(color: Color(red: 1, green: 0.58, blue: 0.4).opacity(glow && d ? 0.45 : 0), radius: 28)

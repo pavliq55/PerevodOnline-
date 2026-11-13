@@ -287,26 +287,28 @@ struct MicOrb: View {
     @State private var ignoreEnd = false
     @State private var locked = false          // потянули вверх — запись закреплена, палец можно убрать
     @State private var pull = CGSize.zero      // шар чуть тянется за пальцем
+    @State private var doneTick = 0            // перевод готов — от шара уходит одна волна
+    @State private var failTick = 0            // не получилось — шар качнётся
+
+    private var phase: OrbPhase {
+        if m.recording { return m.toggleMode ? .locked : .listening }
+        if m.phrase || m.busy { return .thinking }
+        return pressed ? .pressed : .idle
+    }
 
     var body: some View {
-        ZStack {
-            LiveOrb(meter: m.meter, on: m.recording, pressed: pressed)
-            VStack(spacing: 3) {
-                Image(systemName: m.recording ? "stop.fill" : m.busy || m.phrase ? "ellipsis" : "mic.fill")
-                    .font(.system(size: m.recording ? 19 : 28, weight: .semibold))
-                    .symbolEffect(.pulse, isActive: m.busy)
-                if m.recording {   // время записи — прямо в шаре
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        let t = Int(Date().timeIntervalSince(m.recStart))
-                        Text(String(format: "%d:%02d", t / 60, t % 60)).font(.system(size: 14, weight: .semibold).monospacedDigit())
-                    }
-                }
-            }
-            .foregroundStyle(.white)
-            .shadow(color: .black.opacity(0.25), radius: 2)   // белое на жёлтом краю шара иначе теряется
-        }
+        let ph = phase
+        ZStack { LiveOrb(meter: m.meter, phase: ph); OrbGlyph(phase: ph) }
         .padding(8).glass(Circle(), clear: true)
-        .background(MicRings(meter: m.meter, on: m.recording, busy: m.phrase && !m.recording))
+        .overlay(OrbRim(phase: ph, start: m.recStart))
+        .background(OrbHalo(meter: m.meter, phase: ph, doneTick: doneTick))
+        .modifier(Shake(t: CGFloat(failTick)))
+        .onChange(of: m.big) { _, _ in if !m.recording { doneTick += 1 } }
+        .onChange(of: m.hint) { _, h in
+            if ["Не расслышал", "Слишком коротко", "Нет связи", "Не получилось", "Микрофон не включился"].contains(where: { h.hasPrefix($0) }) {
+                withAnimation(.easeOut(duration: 0.45)) { failTick += 1 }
+            }
+        }
         .offset(pull).animation(.spring(duration: 0.25), value: pull)
         .contentShape(Circle())
         .gesture(DragGesture(minimumDistance: 0)
@@ -361,47 +363,171 @@ struct RecordingAura: View {
     }
 }
 
-/// Шар «дышит» голосом: чем громче, тем крупнее.
-private struct LiveOrb: View {
-    @ObservedObject var meter: Meter
-    var on: Bool
-    var pressed: Bool
-    var body: some View {
-        Orb(glow: true).frame(width: 86, height: 86)
-            .scaleEffect(on ? 0.96 + meter.level * 0.12 : pressed ? 0.94 : 1)
-            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: meter.level)
-            .animation(.spring(duration: 0.25), value: on)
-            .animation(.spring(duration: 0.25), value: pressed)
+/// Состояние шара-микрофона. Слов и цифр в шаре нет: что происходит, показывают сам шар и свет вокруг него.
+enum OrbPhase: Equatable { case idle, pressed, listening, locked, thinking }
+
+/// Копит угол поворота заливки: скорость меняется на ходу, без рывка.
+final class OrbClock {
+    private var last: TimeInterval?
+    private var speed = 8.0
+    private var angle = 0.0
+    func tick(_ date: Date, target: Double) -> Double {
+        let now = date.timeIntervalSinceReferenceDate
+        let dt = min(max(now - (last ?? now), 0), 0.1)
+        last = now
+        speed += (target - speed) * min(1, dt * 3)
+        angle += speed * dt
+        return angle
     }
 }
 
-/// Кольца вокруг шара расходятся в такт громкости; каждое следующее чуть запаздывает — получается волна.
-private struct MicRings: View {
+/// Сам шар: в покое заливка едва вращается, пока слушает — вдавлен и «дышит» голосом, пока думает — сжат и крутится быстрее.
+private struct LiveOrb: View {
     @ObservedObject var meter: Meter
-    var on: Bool
-    var busy = false                           // ждём перевод — по кольцу бежит дуга
-    private let colors = [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4), Color(red: 0.95, green: 0.55, blue: 0.72),
-                          Color(red: 0.72, green: 0.61, blue: 1), Color(red: 1, green: 0.79, blue: 0.24)]
+    var phase: OrbPhase
+    @State private var clock = OrbClock()
+    @Environment(\.accessibilityReduceMotion) private var calm
     var body: some View {
-        let l = on ? meter.level : 0
+        let rec = phase == .listening || phase == .locked
+        let l = rec ? meter.level : 0
+        let target = rec ? 36 + 150 * l : (phase == .thinking ? 110.0 : 8.0)
+        TimelineView(.animation(minimumInterval: phase == .idle ? 1.0 / 30 : nil, paused: calm && phase == .idle)) { c in
+            let breath = phase == .thinking ? 0.02 * sin(c.date.timeIntervalSinceReferenceDate * 3.6) : 0
+            Orb(spin: .degrees(clock.tick(c.date, target: target)))
+                .transaction { $0.animation = nil }
+                .scaleEffect(CGFloat(1 + breath))
+        }
+        .frame(width: 86, height: 86)
+        .scaleEffect(base + CGFloat(rec ? 0.09 * l : 0))
+        .animation(.spring(response: 0.24, dampingFraction: 0.8), value: l)
+        .animation(.spring(response: 0.42, dampingFraction: 0.72), value: phase)
+    }
+    private var base: CGFloat {
+        switch phase {
+        case .idle: return 1
+        case .pressed, .listening: return 0.93
+        case .locked: return 0.98
+        case .thinking: return 0.92
+        }
+    }
+}
+
+/// Значок в центре: микрофон; когда запись закреплена — мягкий квадрат «закончить». Один перетекает в другой.
+private struct OrbGlyph: View {
+    var phase: OrbPhase
+    private let berry = Color(red: 0.42, green: 0.10, blue: 0.24)
+    var body: some View {
+        let stop = phase == .locked
+        let think = phase == .thinking
         ZStack {
-            ForEach(0..<3, id: \.self) { i in
-                let k = Double(i)
-                Circle().strokeBorder(AngularGradient(colors: colors, center: .center), lineWidth: 3.2 - k * 0.8)
-                    .frame(width: 106, height: 106)
-                    .scaleEffect(1 + l * (0.16 + 0.17 * k))
-                    .opacity(on ? (0.9 - 0.25 * k) * (0.15 + 0.85 * l) : 0)
-                    .animation(.spring(response: 0.16 + 0.09 * k, dampingFraction: 0.5), value: l)
+            // тёмная «линза» под значком: белое читается и на жёлтом краю шара
+            Circle().fill(RadialGradient(colors: [berry.opacity(0.24), berry.opacity(0)], center: .center, startRadius: 0, endRadius: 34))
+            Group {
+                Image(systemName: "mic.fill").font(.system(size: 28, weight: .semibold))
+                    .scaleEffect(stop ? 0.5 : think ? 0.86 : 1)
+                    .opacity(stop ? 0 : think ? 0.5 : 1)
+                    .blur(radius: stop ? 4 : 0)
+                RoundedRectangle(cornerRadius: 8, style: .continuous).frame(width: 26, height: 26)
+                    .scaleEffect(stop ? 1 : 0.5)
+                    .opacity(stop ? 1 : 0)
+                    .blur(radius: stop ? 0 : 4)
             }
-            TimelineView(.animation(paused: !busy)) { c in
-                Circle().trim(from: 0, to: 0.3)
-                    .stroke(AngularGradient(colors: colors, center: .center), style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
-                    .frame(width: 110, height: 110)
-                    .rotationEffect(.degrees((c.date.timeIntervalSinceReferenceDate * 320).truncatingRemainder(dividingBy: 360)))
+            .foregroundStyle(.white)
+            .shadow(color: berry.opacity(0.3), radius: 6, y: 1)
+        }
+        .frame(width: 86, height: 86)
+        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: phase)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Свет за стеклом: ореол в такт голосу, рябь, пока слушает, и одна волна, когда перевод готов.
+private struct OrbHalo: View {
+    @ObservedObject var meter: Meter
+    var phase: OrbPhase
+    var doneTick: Int
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var calm
+    private static let colors = [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4), Color(red: 0.95, green: 0.55, blue: 0.72),
+                                 Color(red: 0.72, green: 0.61, blue: 1), Color(red: 1, green: 0.79, blue: 0.24)]
+    var body: some View {
+        let rec = phase == .listening || phase == .locked
+        let l = rec ? meter.level : 0
+        let dark = scheme == .dark
+        // на светлом персиковом фоне цветной свет не виден — там он белый; в тёмной теме — цвета шара
+        let light: AnyShapeStyle = dark ? AnyShapeStyle(AngularGradient(colors: Self.colors, center: .center)) : AnyShapeStyle(Color.white)
+        ZStack {
+            Circle().fill(light).frame(width: 102, height: 102).blur(radius: 18)
+                .scaleEffect(CGFloat(rec ? 1.04 + 0.3 * l : (phase == .thinking ? 0.9 : 1.0)))
+                .opacity(rec ? 0.4 + 0.5 * l : (dark && phase != .thinking ? 0.36 : 0))
+                .animation(.spring(response: 0.3, dampingFraction: 0.85), value: l)
+                .animation(.easeInOut(duration: 0.45), value: phase)
+            TimelineView(.animation(paused: !rec || calm)) { c in
+                Canvas { ctx, size in
+                    let t = c.date.timeIntervalSinceReferenceDate
+                    let mid = CGPoint(x: size.width / 2, y: size.height / 2)
+                    let ink: GraphicsContext.Shading = dark ? .conicGradient(Gradient(colors: Self.colors), center: mid) : .color(.white)
+                    for i in 0..<2 {
+                        let p = (t / 2.6 + Double(i) * 0.5).truncatingRemainder(dividingBy: 1)   // жизнь волны 0…1
+                        let r = CGFloat(51 + 28 * p)                                             // от кромки стекла наружу
+                        ctx.opacity = sin(p * .pi) * (1 - p) * 1.2                               // рождается и гаснет прозрачной
+                        ctx.stroke(Path(ellipseIn: CGRect(x: mid.x - r, y: mid.y - r, width: r * 2, height: r * 2)),
+                                   with: ink, lineWidth: CGFloat(2 - 1.2 * p))
+                    }
+                }
             }
-            .opacity(busy ? 1 : 0).animation(.easeInOut(duration: 0.25), value: busy)
+            .frame(width: 164, height: 164)
+            .opacity(rec ? 1 : 0).animation(.easeInOut(duration: 0.4), value: rec)
+            Circle().strokeBorder(light, lineWidth: 2).frame(width: 102, height: 102)
+                .phaseAnimator([0, 1, 2], trigger: doneTick) { v, p in
+                    v.scaleEffect(p == 2 ? 1.45 : 1).opacity(p == 1 ? 0.9 : 0)
+                } animation: { p in
+                    p == 1 ? Animation.easeOut(duration: 0.1) : p == 2 ? Animation.easeOut(duration: 0.65) : Animation.linear(duration: 0.01)
+                }
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// По ободку стекла: тонкая дуга времени, когда запись закреплена (круг — минута), и «комета», пока ждём перевод.
+private struct OrbRim: View {
+    var phase: OrbPhase
+    var start: Date
+    private static let comet = Gradient(stops: [
+        .init(color: T.they.opacity(0), location: 0), .init(color: T.they.opacity(0.6), location: 0.12),
+        .init(color: T.me, location: 0.26), .init(color: T.me, location: 0.32),
+        .init(color: T.me.opacity(0), location: 0.33), .init(color: T.me.opacity(0), location: 1)])
+    var body: some View {
+        ZStack {
+            TimelineView(.animation(minimumInterval: 1.0 / 20, paused: phase != .locked)) { c in
+                let s = max(0, c.date.timeIntervalSince(start))
+                ZStack {
+                    Circle().stroke(T.ink.opacity(s >= 60 ? 0.22 : 0), lineWidth: 2.5)
+                    Circle().trim(from: 0, to: CGFloat(s.truncatingRemainder(dividingBy: 60) / 60))
+                        .stroke(T.ink.opacity(0.72), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+            }
+            .opacity(phase == .locked ? 1 : 0)
+            TimelineView(.animation(paused: phase != .thinking)) { c in
+                Circle().trim(from: 0, to: 0.3)
+                    .stroke(AngularGradient(gradient: Self.comet, center: .center), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees((c.date.timeIntervalSinceReferenceDate * 260).truncatingRemainder(dividingBy: 360)))
+            }
+            .opacity(phase == .thinking ? 1 : 0)
+        }
+        .frame(width: 94, height: 94)
+        .animation(.easeInOut(duration: 0.3), value: phase)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Шар качнулся из стороны в сторону — «не получилось».
+private struct Shake: GeometryEffect {
+    var t: CGFloat
+    var animatableData: CGFloat { get { t } set { t = newValue } }
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: 6 * sin(t * .pi * 3), y: 0))
     }
 }
 
