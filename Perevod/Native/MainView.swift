@@ -168,16 +168,10 @@ struct MainView: View {
     }
 
     // MARK: живой текст, пока говорят
+    // Отдельной плашки «Слушаю» нет: состояние показывает сам шар — кольца в такт голосу и время внутри,
+    // пока ждём перевод — бегущая дуга; слова — в строке подсказки над языками.
     private var liveBlock: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: m.recording).foregroundStyle(T.me)
-                Text(m.recording ? (m.weakNet ? "Слабый интернет…" : "Слушаю") : "Перевожу…").font(T.ui)
-                Spacer()
-                if m.recording { TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text(timeString(Date().timeIntervalSince(m.recStart))).font(T.ui.monospacedDigit()).foregroundStyle(T.dim) } }
-            }
-            .padding(.horizontal, 14).frame(height: 40).glass(Capsule(), clear: true)
             // место под три строки текста и черновик занято заранее: пока говорят, слова дописываются, а экран стоит
             Text(m.liveText.isEmpty ? "…" : m.liveText).font(T.live).foregroundStyle(T.ink).tracking(-0.5)
                 .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
@@ -187,8 +181,6 @@ struct MainView: View {
         .transaction(value: m.liveText) { $0.animation = nil }
         .transaction(value: m.liveDraft) { $0.animation = nil }
     }
-
-    private func timeString(_ t: TimeInterval) -> String { String(format: "%d:%02d", Int(t) / 60, Int(t) % 60) }
 
     // MARK: низ — языки, клавиатура · шар · камера
     private var bottom: some View {
@@ -200,7 +192,7 @@ struct MainView: View {
                             .background(Capsule().fill(T.field))
                     }.transition(.opacity.combined(with: .scale(scale: 0.9)))
                 } else {
-                    Text(m.hint).font(T.label).foregroundStyle(T.dim).transition(.opacity)
+                    Text(m.recording && m.weakNet ? "Слабый интернет…" : m.hint).font(T.label).foregroundStyle(T.dim).transition(.opacity)
                 }
             }
             .frame(height: 18)
@@ -239,13 +231,22 @@ struct MicOrb: View {
     var body: some View {
         ZStack {
             LiveOrb(meter: m.meter, on: m.recording, pressed: pressed)
-            Image(systemName: m.recording ? "stop.fill" : m.busy || m.phrase ? "ellipsis" : "mic.fill")
-                .font(.system(size: m.recording ? 24 : 28, weight: .semibold)).foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.25), radius: 2)   // белый значок на жёлтом краю шара иначе теряется
-                .symbolEffect(.pulse, isActive: m.busy)
+            VStack(spacing: 3) {
+                Image(systemName: m.recording ? "stop.fill" : m.busy || m.phrase ? "ellipsis" : "mic.fill")
+                    .font(.system(size: m.recording ? 19 : 28, weight: .semibold))
+                    .symbolEffect(.pulse, isActive: m.busy)
+                if m.recording {   // время записи — прямо в шаре
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        let t = Int(Date().timeIntervalSince(m.recStart))
+                        Text(String(format: "%d:%02d", t / 60, t % 60)).font(.system(size: 14, weight: .semibold).monospacedDigit())
+                    }
+                }
+            }
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.25), radius: 2)   // белое на жёлтом краю шара иначе теряется
         }
         .padding(8).glass(Circle(), clear: true)
-        .background(MicRings(meter: m.meter, on: m.recording))
+        .background(MicRings(meter: m.meter, on: m.recording, busy: m.phrase && !m.recording))
         .offset(pull).animation(.spring(duration: 0.25), value: pull)
         .contentShape(Circle())
         .gesture(DragGesture(minimumDistance: 0)
@@ -318,6 +319,7 @@ private struct LiveOrb: View {
 private struct MicRings: View {
     @ObservedObject var meter: Meter
     var on: Bool
+    var busy = false                           // ждём перевод — по кольцу бежит дуга
     private let colors = [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4), Color(red: 0.95, green: 0.55, blue: 0.72),
                           Color(red: 0.72, green: 0.61, blue: 1), Color(red: 1, green: 0.79, blue: 0.24)]
     var body: some View {
@@ -331,6 +333,13 @@ private struct MicRings: View {
                     .opacity(on ? (0.9 - 0.25 * k) * (0.15 + 0.85 * l) : 0)
                     .animation(.spring(response: 0.16 + 0.09 * k, dampingFraction: 0.5), value: l)
             }
+            TimelineView(.animation(paused: !busy)) { c in
+                Circle().trim(from: 0, to: 0.3)
+                    .stroke(AngularGradient(colors: colors, center: .center), style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
+                    .frame(width: 110, height: 110)
+                    .rotationEffect(.degrees((c.date.timeIntervalSinceReferenceDate * 320).truncatingRemainder(dividingBy: 360)))
+            }
+            .opacity(busy ? 1 : 0).animation(.easeInOut(duration: 0.25), value: busy)
         }
         .allowsHitTesting(false)
     }
@@ -363,7 +372,7 @@ private struct SwipeRow<Content: View>: View {
                 dx = x < 0 ? max(x, -430) : min(x * 0.55, 92)   // вправо — с сопротивлением: это не удаление, а «кнопка»
             }, ended: { v in
                 guard !gone else { return }
-                if let v, dx <= Self.del || (v < -900 && dx < -24) {
+                if let v, dx <= Self.del || (dx < -20 && dx + v * 0.12 <= Self.del) {   // дотянул до корзины или смахнул быстрым движением
                     withAnimation(.easeOut(duration: 0.2)) { gone = true; dx = -520 } completion: { onDelete() }
                 } else {
                     if v != nil, dx >= Self.say { onSpeak() }

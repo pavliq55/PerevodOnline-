@@ -40,6 +40,17 @@ jobs:
             -destination "id=$UDID" -derivedDataPath build 2>&1 | tee ci-test.log | grep -E "STEP|BUBBLES|error|Test Case|TEST" || true
           xcrun simctl io "$UDID" screenshot shots/gestures-end.png
           kill -INT $REC; wait $REC || true
+          # шар во время записи и пока ждём перевод (светлая и тёмная тема)
+          xcrun simctl spawn "$UDID" defaults write com.pavliq55.tapny consent_v1 -bool YES
+          for th in light dark; do
+            xcrun simctl ui "$UDID" appearance $th
+            for v in demoRec demoBusy; do
+              xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
+              xcrun simctl launch "$UDID" com.pavliq55.tapny -$v YES; sleep 5
+              xcrun simctl io "$UDID" screenshot shots/$th-$v.png
+            done
+          done
+          xcrun simctl ui "$UDID" appearance light
           ls -la shots
       - uses: actions/upload-artifact@v4
         if: always()

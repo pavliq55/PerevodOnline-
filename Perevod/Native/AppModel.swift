@@ -79,7 +79,7 @@ struct Item: Identifiable, Codable, Equatable {
         // «-demoFlow YES» (три фразы «как вживую» — для видео, плавно ли перестраивается экран),
         // «-demoMany YES» (длинная лента — для проверки свайпов настоящими касаниями, см. UITests)
         let ud = UserDefaults.standard
-        if ud.bool(forKey: "demoUI") || ud.bool(forKey: "demoRec") || ud.bool(forKey: "demoFlow") || ud.bool(forKey: "demoMany") {
+        if ud.bool(forKey: "demoUI") || ud.bool(forKey: "demoRec") || ud.bool(forKey: "demoFlow") || ud.bool(forKey: "demoMany") || ud.bool(forKey: "demoBusy") {
             loggedIn = true
             items = [Item(mine: true, src: "ru", to: "id", text: "Здравствуйте, сколько стоит аренда байка на неделю?", out: "Halo, berapa sewa motor seminggu?"),
                      Item(mine: false, src: "id", to: "ru", text: "Untuk seminggu 700 ribu, sudah termasuk helm.", out: "За неделю 700 тысяч, шлем включён."),
@@ -95,6 +95,7 @@ struct Item: Identifiable, Codable, Equatable {
             }
             big = items.last?.id
             if ud.bool(forKey: "demoFlow") { Task { await demoFlow() } }
+            if ud.bool(forKey: "demoBusy") { phrase = true; busy = true; hint = "Перевожу…"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             if ud.bool(forKey: "demoRec") { meter.level = 0.8; phrase = true; recording = true; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             return
         }
