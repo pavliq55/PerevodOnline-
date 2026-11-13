@@ -96,13 +96,15 @@ struct MainView: View {
             Text(it.out).font(T.text).foregroundStyle(T.ink).multilineTextAlignment(it.mine ? .trailing : .leading)
         }
         .frame(maxWidth: .infinity, alignment: it.mine ? .trailing : .leading)
-        .textSelection(.enabled)
+        .contentShape(Rectangle()).onTapGesture { full = it }   // касание по переводу — на весь экран
+        .contextMenu { menu(it) }
     }
 
     private func latest(_ it: Item) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             label(it, latest: true)
-            Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5).textSelection(.enabled)
+            Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
+                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
             if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
             HStack(spacing: 10) {
                 chip("doc.on.doc") { UIPasteboard.general.string = it.out; UINotificationFeedbackGenerator().notificationOccurred(.success) }
