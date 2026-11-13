@@ -58,6 +58,8 @@ struct FullView: View {
                 Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 18, weight: .semibold)).frame(width: 50, height: 50) }.glass(Circle(), clear: true)
             }.foregroundStyle(T.ink) }.padding(.bottom, 30) }
         }
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 30).onEnded { v in if v.translation.height > 90 { dismiss() } })   // смахнуть вниз — закрыть
     }
 }
 

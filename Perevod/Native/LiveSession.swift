@@ -95,6 +95,8 @@ final class Mic {
     private(set) var pcm = Data()
     private(set) var frames = 0
     var onChunk: ((Data) -> Void)?
+    var onLevel: ((Double) -> Void)?   // громкость 0…1 во время записи — для колец вокруг шара
+    private var shown = 0.0
     var running: Bool { engine.isRunning }
     // Микрофон «тёплый» (13.11.2026): холодный запуск занимал 0,3–0,5 с — съедал начало фразы, а короткое касание
     // из-за этой паузы считалось «подержал и отпустил». Теперь микрофон включается заранее (при открытии приложения
@@ -145,6 +147,7 @@ final class Mic {
 
     func stop() {
         capturing = false
+        shown = 0; onLevel?(0)
         sleepLater()
     }
 
@@ -188,6 +191,10 @@ final class Mic {
             }
             self.frames += 1
             if mx > self.peak { self.peak = mx }
+            // шкала в децибелах (−50…−8 дБ → 0…1): тихая речь уже заметна; вверх — сразу, вниз — плавно
+            let db = 20 * log10(max(Double(mx) / 32768, 0.0001))
+            self.shown = max(min(max((db + 50) / 42, 0), 1), self.shown * 0.7)
+            self.onLevel?(self.shown)
             if self.pcm.count < 16000 * 2 * 120 { self.pcm.append(raw) }
             self.onChunk?(ulaw)
         }

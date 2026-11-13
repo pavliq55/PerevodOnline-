@@ -63,7 +63,9 @@ struct MainView: View {
                     Color.clear.frame(height: 66)
                     if m.items.isEmpty && !m.phrase { empty }
                     ForEach(m.items) { it in
-                        if it.id == m.items.last?.id { latest(it) } else { row(it) }
+                        SwipeRow(onDelete: { m.remove(it) }, onSpeak: { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") }) {
+                            if it.id == m.items.last?.id { latest(it) } else { row(it) }
+                        }
                     }
                     if m.phrase { liveBlock.padding(.horizontal, 8).padding(.top, 10).transition(.asymmetric(insertion: .opacity, removal: .identity)) }   // уходит сразу: на его месте уже готовый перевод
                     Color.clear.frame(height: 230).id("end")
@@ -75,7 +77,7 @@ struct MainView: View {
             .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)
             .onChange(of: m.phrase) { _, on in if on { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
-            .onChange(of: m.items.count) { _, _ in withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } }
+            .onChange(of: m.items.count) { was, now in if now > was && m.undo == nil { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
         }
     }
 
@@ -183,7 +185,14 @@ struct MainView: View {
     // MARK: низ — языки, клавиатура · шар · камера
     private var bottom: some View {
         VStack(spacing: 14) {
-            Text(m.hint).font(T.label).foregroundStyle(T.dim).frame(height: 18)
+            if m.undo != nil {
+                Button { m.restore() } label: {
+                    Label("Удалено · Вернуть", systemImage: "arrow.uturn.backward").font(T.label).foregroundStyle(T.ink).padding(.horizontal, 12).frame(height: 30)
+                        .background(Capsule().fill(T.field))
+                }.frame(height: 18)
+            } else {
+                Text(m.hint).font(T.label).foregroundStyle(T.dim).frame(height: 18)
+            }
             Button { showLangs = true } label: {
                 HStack(spacing: 12) {
                     Text("Русский"); Image(systemName: "arrow.left.arrow.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(T.dim)
@@ -208,19 +217,17 @@ struct MicOrb: View {
     @State private var pressAt = Date()
     @State private var pressed = false
     @State private var ignoreEnd = false
-    @State private var pulse = false
 
     var body: some View {
         ZStack {
-            Orb(glow: true).frame(width: 86, height: 86)
-                .scaleEffect(m.recording ? (pulse ? 1.1 : 0.96) : pressed ? 0.94 : 1)
-                .animation(m.recording ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .spring(duration: 0.25), value: pulse)
+            LiveOrb(meter: m.meter, on: m.recording, pressed: pressed)
             Image(systemName: m.recording ? "stop.fill" : m.busy || m.phrase ? "ellipsis" : "mic.fill")
                 .font(.system(size: m.recording ? 24 : 28, weight: .semibold)).foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.25), radius: 2)   // белый значок на жёлтом краю шара иначе теряется
                 .symbolEffect(.pulse, isActive: m.busy)
         }
         .padding(8).glass(Circle(), clear: true)
+        .background(MicRings(meter: m.meter, on: m.recording))
         .contentShape(Circle())
         .gesture(DragGesture(minimumDistance: 0)
             .onChanged { v in
@@ -234,7 +241,6 @@ struct MicOrb: View {
                 if v.time.timeIntervalSince(pressAt) < 0.35 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить" }
                 else { m.stopRec() }
             })
-        .onChange(of: m.recording) { _, r in pulse = r }
         .accessibilityLabel(m.recording ? "Закончить фразу" : "Говорить")
     }
 }
@@ -259,5 +265,74 @@ struct RecordingAura: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .onAppear { withAnimation(.linear(duration: 9).repeatForever(autoreverses: false)) { t = true } }
+    }
+}
+
+/// Шар «дышит» голосом: чем громче, тем крупнее.
+private struct LiveOrb: View {
+    @ObservedObject var meter: Meter
+    var on: Bool
+    var pressed: Bool
+    var body: some View {
+        Orb(glow: true).frame(width: 86, height: 86)
+            .scaleEffect(on ? 0.96 + meter.level * 0.12 : pressed ? 0.94 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: meter.level)
+            .animation(.spring(duration: 0.25), value: on)
+            .animation(.spring(duration: 0.25), value: pressed)
+    }
+}
+
+/// Кольца вокруг шара расходятся в такт громкости; каждое следующее чуть запаздывает — получается волна.
+private struct MicRings: View {
+    @ObservedObject var meter: Meter
+    var on: Bool
+    private let colors = [Color(red: 1, green: 0.79, blue: 0.24), Color(red: 1, green: 0.58, blue: 0.4), Color(red: 0.95, green: 0.55, blue: 0.72),
+                          Color(red: 0.72, green: 0.61, blue: 1), Color(red: 1, green: 0.79, blue: 0.24)]
+    var body: some View {
+        let l = on ? meter.level : 0
+        ZStack {
+            ForEach(0..<3, id: \.self) { i in
+                let k = Double(i)
+                Circle().strokeBorder(AngularGradient(colors: colors, center: .center), lineWidth: 3.2 - k * 0.8)
+                    .frame(width: 106, height: 106)
+                    .scaleEffect(1 + l * (0.16 + 0.17 * k))
+                    .opacity(on ? (0.9 - 0.25 * k) * (0.15 + 0.85 * l) : 0)
+                    .animation(.spring(response: 0.16 + 0.09 * k, dampingFraction: 0.5), value: l)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Свайп по реплике: влево — удалить (можно вернуть), вправо — озвучить.
+private struct SwipeRow<Content: View>: View {
+    var onDelete: () -> Void
+    var onSpeak: () -> Void
+    @ViewBuilder var content: Content
+    @GestureState(resetTransaction: Transaction(animation: .spring(duration: 0.3))) private var dx: CGFloat = 0
+    private static var del: CGFloat { -90 }
+    private static var say: CGFloat { 70 }
+
+    private static func side(_ v: DragGesture.Value) -> CGFloat {   // только явно горизонтальное движение — прокрутке ленты не мешаем
+        abs(v.translation.width) > abs(v.translation.height) * 1.6 ? v.translation.width : 0
+    }
+
+    var body: some View {
+        let armed = dx <= Self.del || dx >= Self.say
+        content
+            .offset(x: dx)
+            .background(alignment: dx < 0 ? .trailing : .leading) {
+                Image(systemName: dx < 0 ? "trash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 20, weight: .semibold)).foregroundStyle(dx < 0 ? T.err : T.ink)
+                    .scaleEffect(armed ? 1.25 : 0.9).opacity(min(abs(dx) / 60, 1)).padding(.horizontal, 14)
+                    .animation(.spring(duration: 0.2), value: armed)
+            }
+            .simultaneousGesture(DragGesture(minimumDistance: 22)
+                .updating($dx) { v, s, _ in s = min(max(Self.side(v), -150), 110) }
+                .onEnded { v in
+                    let w = Self.side(v)
+                    if w <= Self.del { onDelete() } else if w >= Self.say { onSpeak() }
+                })
+            .onChange(of: armed) { _, a in if a { UIImpactFeedbackGenerator(style: .medium).impactOccurred() } }
     }
 }

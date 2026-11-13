@@ -14,6 +14,9 @@ struct Item: Identifiable, Codable, Equatable {
     var draft = false          // черновой перевод, пока говорят
 }
 
+/// Громкость голоса — отдельно от остального состояния: меняется ~20 раз в секунду и перерисовывает только шар.
+@MainActor final class Meter: ObservableObject { @Published var level = 0.0 }
+
 /// Состояние приложения: история, язык собеседника, запись, онлайн-распознавание, перевод, озвучка.
 @MainActor final class AppModel: ObservableObject {
     @Published var items: [Item] = []
@@ -37,6 +40,10 @@ struct Item: Identifiable, Codable, Equatable {
     @Published var weakNet = false
 
     let voice = Voice()
+    let meter = Meter()
+    @Published var undo: Item?                 // только что удалённая реплика — можно вернуть
+    private var undoAt = 0
+    private var undoTask: Task<Void, Never>?
     private let mic = Mic()
     private var session: LiveSession?
     private var spare: LiveSession?
@@ -49,6 +56,7 @@ struct Item: Identifiable, Codable, Equatable {
 
     init() {
         load()
+        mic.onLevel = { [weak self] v in self?.meter.level = v }
         // только для снимков в облачной сборке: «-demoUI YES» (пример разговора), «-demoRec YES» (идёт запись),
         // «-demoFlow YES» (две фразы «как вживую» — для видео, плавно ли перестраивается экран)
         let ud = UserDefaults.standard
@@ -58,7 +66,7 @@ struct Item: Identifiable, Codable, Equatable {
                      Item(mine: false, src: "id", to: "ru", text: "Untuk seminggu 700 ribu, sudah termasuk helm.", out: "За неделю 700 тысяч, шлем включён."),
                      Item(mine: false, src: "id", to: "ru", text: "Bisa, jam delapan sudah buka.", out: "Да, в восемь мы уже открыты.")]
             if ud.bool(forKey: "demoFlow") { Task { await demoFlow() } }
-            if ud.bool(forKey: "demoRec") { phrase = true; recording = true; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
+            if ud.bool(forKey: "demoRec") { meter.level = 0.8; phrase = true; recording = true; recStart = Date().addingTimeInterval(-4); liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             return
         }
         voice.blocked = { [weak self] in self?.recording ?? false }
@@ -80,10 +88,10 @@ struct Item: Identifiable, Codable, Equatable {
             liveText = ""; liveDraft = ""; phrase = true; recording = true; recStart = Date(); hint = "Говорите… отпустите — переведу"
             var acc = ""
             for (i, w) in text.split(separator: " ").enumerated() {
-                await nap(0.3); acc += (acc.isEmpty ? "" : " ") + w; liveText = acc
+                await nap(0.15); meter.level = Double.random(in: 0.2...1); await nap(0.15); meter.level = Double.random(in: 0.1...0.9); acc += (acc.isEmpty ? "" : " ") + w; liveText = acc
                 if i == 4 { liveDraft = String(out.prefix(out.count / 2)) }
             }
-            await nap(0.4); recording = false
+            await nap(0.4); recording = false; meter.level = 0
             await nap(0.17); busy = true; hint = "Перевожу…"
             await nap(0.9)
             items.append(Item(mine: mine, src: mine ? "ru" : "id", to: mine ? "id" : "ru", text: text, out: out))
@@ -99,7 +107,19 @@ struct Item: Identifiable, Codable, Equatable {
     private func load() { if let d = try? Data(contentsOf: file), let h = try? JSONDecoder().decode([Item].self, from: d) { items = h } }
     func save() { items = Array(items.suffix(60)); try? JSONEncoder().encode(items.filter { !$0.draft }).write(to: file) }
     func clear() { items = []; save() }
-    func remove(_ it: Item) { items.removeAll { $0.id == it.id }; save() }
+    func remove(_ it: Item) {
+        guard let i = items.firstIndex(where: { $0.id == it.id }) else { return }
+        if voice.playingId == it.id { voice.stop() }
+        items.remove(at: i); save()
+        undo = it; undoAt = i
+        undoTask?.cancel()
+        undoTask = Task { try? await Task.sleep(nanoseconds: 5_000_000_000); if !Task.isCancelled { undo = nil } }
+    }
+    func restore() {
+        guard let it = undo else { return }
+        undoTask?.cancel(); undo = nil
+        items.insert(it, at: min(undoAt, items.count)); save()
+    }
 
     // MARK: вход
     func login(pin: String) async throws {
