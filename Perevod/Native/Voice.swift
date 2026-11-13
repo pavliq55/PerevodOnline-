@@ -118,14 +118,22 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
     }
 
     /// Короткий мягкий тон (WAV) — вместо голоса при показе на видео.
-    private static let tone: Data = {
-        let sr = 16000, n = 16000 * 2
+    private static let tone: Data = Voice.makeTone()
+    nonisolated private static func makeTone() -> Data {
+        let sr: Int = 16000
+        let n: Int = sr * 2
         var d = Data()
-        func le<V: FixedWidthInteger>(_ v: V) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
-        d.append(contentsOf: Array("RIFF".utf8)); le(UInt32(36 + n * 2)); d.append(contentsOf: Array("WAVEfmt ".utf8))
-        le(UInt32(16)); le(UInt16(1)); le(UInt16(1)); le(UInt32(sr)); le(UInt32(sr * 2)); le(UInt16(2)); le(UInt16(16))
-        d.append(contentsOf: Array("data".utf8)); le(UInt32(n * 2))
-        for i in 0..<n { le(Int16(sin(Double(i) * 2 * Double.pi * 440 / Double(sr)) * 2500)) }
+        func u32(_ v: Int) { var x: UInt32 = UInt32(v).littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func u16(_ v: Int) { var x: UInt16 = UInt16(v).littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        d.append(Data("RIFF".utf8)); u32(36 + n * 2); d.append(Data("WAVEfmt ".utf8))
+        u32(16); u16(1); u16(1); u32(sr); u32(sr * 2); u16(2); u16(16)
+        d.append(Data("data".utf8)); u32(n * 2)
+        let step: Double = 2.0 * Double.pi * 440.0 / Double(sr)
+        for i in 0..<n {
+            let v: Double = sin(Double(i) * step) * 2500.0
+            var x: Int16 = Int16(v).littleEndian
+            d.append(Data(bytes: &x, count: 2))
+        }
         return d
-    }()
+    }
 }
