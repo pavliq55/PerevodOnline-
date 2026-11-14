@@ -221,12 +221,12 @@ private struct LongText<C: View>: View {
                 y = v[0]; rest = v[1]; page = v[2]
             }
             // под стрелкой текста нет: строки тают выше неё
-            .mask(VStack(spacing: 0) {
+            .mask { VStack(spacing: 0) {
                 LinearGradient(colors: [Color.black.opacity(y > 6 ? 0 : 1), Color.black], startPoint: .top, endPoint: .bottom).frame(height: 36)
                 Color.black
                 LinearGradient(colors: [Color.black, Color.black.opacity(more ? 0 : 1)], startPoint: .top, endPoint: .bottom).frame(height: 64)
                 Color.black.opacity(more ? 0 : 1).frame(height: 44)
-            })
+            } }
             .overlay(alignment: .bottom) {
                 if more {
                     Button {
