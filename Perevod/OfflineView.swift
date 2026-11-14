@@ -8,9 +8,22 @@ import Network
 @MainActor final class Net: ObservableObject {
     @Published var online = true
     private let monitor = NWPathMonitor()
+    private var ok = true
     init() {
-        monitor.pathUpdateHandler = { p in Task { @MainActor in self.online = p.status == .satisfied } }
+        monitor.pathUpdateHandler = { p in
+            let v = p.status == .satisfied
+            Task { @MainActor in self.set(v) }
+        }
         monitor.start(queue: .main)
+    }
+    /// Связь мигнула (Wi-Fi ↔ сотовая) — офлайн-экран не показываем: только если её нет дольше 2 с.
+    private func set(_ v: Bool) {
+        ok = v
+        if v { online = true; return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, !self.ok else { return }
+            self.online = false
+        }
     }
 }
 
@@ -88,6 +101,7 @@ struct OfflineView: View {
         .padding(20)
         .background(Color(.systemBackground))
         .onChange(of: mic.running) { _, running in if !running && !input.isEmpty { translate() } }
+        .onDisappear { mic.stop() }      // связь вернулась — диктовка не продолжает слушать под экраном переводчика
         .translationTask(config) { session in
             do { output = try await session.translate(input).targetText; status = "" }
             catch { output = ""; status = "Нет офлайн-пакета языка. Скачай его, пока есть интернет: Настройки → Приложения → Перевод (Apple) → Языки." }
@@ -111,7 +125,7 @@ struct OfflineView: View {
 /// Диктовка без интернета: распознавание речи на самом айфоне.
 @MainActor final class OfflineMic: ObservableObject {
     @Published var running = false
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
 
@@ -124,17 +138,20 @@ struct OfflineView: View {
     func start(locale: String, onText: @escaping (String) -> Void) {
         SFSpeechRecognizer.requestAuthorization { st in
             Task { @MainActor in
-                guard st == .authorized, let rec = SFSpeechRecognizer(locale: Locale(identifier: locale)), rec.isAvailable else { return }
+                guard !self.running, st == .authorized, let rec = SFSpeechRecognizer(locale: Locale(identifier: locale)), rec.isAvailable else { return }
                 let req = SFSpeechAudioBufferRecognitionRequest()
                 req.shouldReportPartialResults = true
                 if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
-                self.request = req
+                // движок каждый раз новый: старый после смены звука (наушники ↔ динамик) помнит прежний формат
+                self.engine = AVAudioEngine()
                 let input = self.engine.inputNode
                 let fmt = input.outputFormat(forBus: 0)
                 guard fmt.sampleRate > 0, fmt.channelCount > 0 else { return }   // идёт звонок — микрофон занят, иначе приложение упадёт
-                input.removeTap(onBus: 0)
-                input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { b, _ in req.append(b) }
-                self.engine.prepare(); try? self.engine.start()
+                // формат не задаём — берётся тот, что у микрофона сейчас (заданный и устаревший роняет приложение)
+                input.installTap(onBus: 0, bufferSize: 1024, format: nil) { b, _ in req.append(b) }
+                self.engine.prepare()
+                do { try self.engine.start() } catch { input.removeTap(onBus: 0); return }   // не включился — кнопка не показывает «слушаю»
+                self.request = req
                 self.running = true
                 self.task = rec.recognitionTask(with: req) { r, e in
                     Task { @MainActor in

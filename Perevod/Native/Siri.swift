@@ -1,5 +1,6 @@
 import AppIntents
 import AVFoundation
+import UIKit
 
 /// «Привет, Siri, скажи через Тапни» → Siri спрашивает «Что сказать?» → фраза переводится на язык собеседника
 /// и звучит из айфона. Приложение открывать не нужно, руки свободны. Фраза потом появляется в ленте.
@@ -27,7 +28,7 @@ struct SayIntent: AudioPlaybackIntent {
         let t0 = Date()
         let r: Api.Tr
         do { r = try await Api.translate(t, to: Shared.partner) } catch {
-            await Log.sendNow("err", ["at": "siri", "err": String("\(error)".prefix(300))])
+            await Log.sendNow("err", ["at": "siri", "err": String(Log.brief(error).prefix(300))])
             throw Fail(say: "Не получилось перевести. Проверьте интернет.")
         }
         let it = Item(mine: r.mine, src: r.mine ? "ru" : r.src, to: r.to, text: t, out: r.out)
@@ -43,6 +44,8 @@ struct SayIntent: AudioPlaybackIntent {
                 else { try? await Task.sleep(nanoseconds: 400_000_000) }
             }
         }
+        // приложение не на экране — звук отдаём обратно: музыка или подкаст продолжат играть
+        if UIApplication.shared.applicationState == .background { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
         Inbox.put(it, speak: !ok)
         await Log.sendNow("siri", ["ok": ok, "tries": tries, "trMs": trMs, "ms": Log.ms(since: t0), "why": ok ? "" : why, "stuck": OneShot.shared.stuck, "out": Audio.out])
         if !ok { throw Fail(say: "Перевод готов, но сказать вслух не получилось. Откройте Tapny — фраза прозвучит там.") }

@@ -3,6 +3,8 @@
 # 2) Когда в секретах есть ключ App Store Connect (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8) и
 #    TESTFLIGHT=1 в переменных репозитория — подписанная сборка и отправка в TestFlight.
 name: build
+permissions:
+  contents: read
 on:
   push:
     branches: [main]

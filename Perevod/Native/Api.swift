@@ -14,7 +14,11 @@ enum Api {
     static func request(_ path: String, query: [URLQueryItem] = [], body: Data? = nil, type: String = "application/json",
                         key: String? = nil, timeout: TimeInterval = 20) async throws -> Data {
         var c = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        if !query.isEmpty { c.queryItems = query }
+        if !query.isEmpty {
+            c.queryItems = query
+            // «+» в адресе сервер читает как пробел: «2+2» озвучивалось как «2 2»
+            c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         var r = URLRequest(url: c.url!)
         r.httpMethod = body == nil ? "GET" : "POST"; r.httpBody = body; r.timeoutInterval = timeout
         if let k = key ?? self.key { r.setValue(k, forHTTPHeaderField: "X-Pin") }

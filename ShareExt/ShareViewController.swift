@@ -88,7 +88,8 @@ final class ShareViewController: UIViewController {
     private func jpeg(_ img: UIImage) -> Data? {
         let k = min(1, 1280 / max(img.size.width, img.size.height))
         let size = CGSize(width: img.size.width * k, height: img.size.height * k)
-        let small = UIGraphicsImageRenderer(size: size).image { _ in img.draw(in: CGRect(origin: .zero, size: size)) }
+        let f = UIGraphicsImageRendererFormat(); f.scale = 1   // иначе снимок выходит втрое крупнее (экран ×3) — и втрое дольше уходит
+        let small = UIGraphicsImageRenderer(size: size, format: f).image { _ in img.draw(in: CGRect(origin: .zero, size: size)) }
         return small.jpegData(compressionQuality: 0.75)
     }
 }

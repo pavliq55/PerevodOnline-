@@ -113,7 +113,8 @@ final class Mic {
     private var peak: Int16 = 0
     private(set) var lastWarm = false
     private(set) var lastStartMs = 0
-    private(set) var lastFix = 0       // сколько раз пришлось «чинить» микрофон при включении: 1 — новый движок, 2 — ещё и звук заново
+    private(set) var lastFix = 0       // 2 — при нажатии микрофон молчал, пришлось включать звук заново
+    private(set) var revives = 0       // сколько раз микрофон поднимали после смены звука (наушники ↔ динамик) — в журнал
     var level: Double { Double(peak) / 32768 }   // громкость записи 0…1 — в журнал: тишина это или сервер не расслышал
     private static let keep: TimeInterval = 45
 
@@ -122,36 +123,50 @@ final class Mic {
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] n in
             let who = n.object as? AVAudioEngine
             DispatchQueue.main.async {
-                guard let self, who === self.engine, self.want, !self.engine.isRunning else { return }
-                try? self.run()
+                guard let self, who === self.engine else { return }
+                self.revive()
             }
         }
     }
 
     /// Микрофон не отдаёт звук: идёт звонок (телефон, Telegram, WhatsApp) — айфон отдаёт микрофон только ему.
     struct Busy: Error {}
+    /// Доступ к микрофону запрещён в Настройках айфона.
+    struct Denied: Error {}
 
     /// deep — нажали на шар: если микрофон молчит, пробуем всё, вплоть до включения звука заново.
     private func run(deep: Bool = false) throws {
         guard !engine.isRunning else { return }
-        lastFix = 0
+        if deep { lastFix = 0 }
+        // движок каждый раз новый: старый после смены звука (наушники ↔ динамик, звонок) помнит прежний формат —
+        // и молчит («занят звонком» без звонка, 14.11.2026) или роняет приложение при включении
+        engine.inputNode.removeTap(onBus: 0)
+        engine = AVAudioEngine()
         var input = engine.inputNode
         var inFmt = input.outputFormat(forBus: 0)
-        // «пустой» формат (0 Гц) бывает и без звонка (14.11.2026; причина не найдена, помогал перезапуск приложения):
-        // сначала новый движок, если не помог — включаем звук заново
-        while (inFmt.sampleRate <= 0 || inFmt.channelCount == 0) && lastFix < (deep ? 2 : 1) {
-            if lastFix == 1 { Audio.restart() }
+        // формат всё равно «пустой» (0 Гц), а на шар нажали — включаем звук заново
+        if deep, inFmt.sampleRate <= 0 || inFmt.channelCount == 0 {
+            Audio.restart()
             engine = AVAudioEngine(); input = engine.inputNode; inFmt = input.outputFormat(forBus: 0)
-            lastFix += 1
+            lastFix = 2
         }
         // во время звонка формат так и остаётся пустым — с ним installTap роняет приложение прямо при открытии
         guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else { throw Busy() }
-        input.removeTap(onBus: 0)
         // формат не задаём — берётся тот, что у микрофона сейчас (заданный и устаревший роняет приложение)
         input.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buf, _ in self?.process(buf) }
         engine.prepare()
-        try engine.start()
+        do { try engine.start() } catch { input.removeTap(onBus: 0); throw error }
         want = true
+    }
+
+    /// Звук сменился — айфон остановил микрофон. Включаем снова; новый формат появляется не сразу, поэтому до 6 попыток.
+    private func revive(_ n: Int = 0) {
+        guard want, !engine.isRunning else { return }
+        revives += 1
+        do { try run() } catch {
+            guard n < 5 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.revive(n + 1) }
+        }
     }
 
     /// Включить микрофон заранее. Только если доступ уже разрешён — запрос доступа при открытии приложения не показываем.
@@ -162,6 +177,7 @@ final class Mic {
     }
 
     func start(preroll: Bool = true) throws {
+        if AVAudioApplication.shared.recordPermission == .denied { throw Denied() }
         cool?.cancel()
         let t0 = Date()
         lastWarm = engine.isRunning
@@ -246,7 +262,7 @@ final class Mic {
     }
 
     /// WAV из записанного PCM16 — для запасного распознавания (/api/stt).
-    func wav() -> Data {
+    static func wav(_ pcm: Data) -> Data {
         var d = Data()
         func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
         func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }

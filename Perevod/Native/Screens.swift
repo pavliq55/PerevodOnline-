@@ -44,8 +44,8 @@ struct FullView: View {
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 30).onEnded { v in if v.translation.height > 90 { dismiss() } })   // смахнуть вниз — закрыть
         // пока текст показывают человеку, экран не гаснет
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = Pref.bool("keepAwake", false) }
+        .onAppear { Awake.show += 1; Awake.apply() }
+        .onDisappear { Awake.show = max(0, Awake.show - 1); Awake.apply() }
     }
 }
 
@@ -243,6 +243,9 @@ struct ConversationView: View {
                      sub: last.map { $0.mine ? "Вы сказали" : "Собеседник сказал" } ?? "Русский")
             }
         }
+        // экран на двоих лежит между людьми — гаснуть не должен
+        .onAppear { Awake.show += 1; Awake.apply() }
+        .onDisappear { Awake.show = max(0, Awake.show - 1); Awake.apply() }
     }
     private func half(text: String, sub: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -259,6 +262,7 @@ struct SettingsView: View {
     @EnvironmentObject var m: AppModel
     @Environment(\.dismiss) var dismiss
     @State private var prep = false
+    @State private var askClear = false
     // «-demoSettings 1…3» — снимки в облачной сборке: верх списка, низ списка, «Мои слова»
     private let demo = UserDefaults.standard.integer(forKey: "demoSettings")
     @State private var demoWords = UserDefaults.standard.integer(forKey: "demoSettings") == 3
@@ -333,7 +337,10 @@ struct SettingsView: View {
         Section {
             Picker("Хранить", selection: $m.keep) { Text("60 фраз").tag(60); Text("300 фраз").tag(300); Text("Не хранить").tag(0) }
             ShareLink(item: m.exportText) { Text("Выгрузить разговор") }.disabled(m.items.isEmpty)
-            Button("Очистить разговор", role: .destructive) { m.clear() }
+            Button("Очистить разговор", role: .destructive) { askClear = true }.disabled(m.items.isEmpty)
+                .confirmationDialog("Удалить весь разговор?", isPresented: $askClear, titleVisibility: .visible) {
+                    Button("Удалить", role: .destructive) { m.clear() }
+                }
         } header: { Text("История") } footer: {
             Text("«Не хранить» — разговор виден, пока приложение открыто, и на айфон не записывается.")
         }

@@ -15,14 +15,23 @@ enum Log {
     static func send(_ ev: String, _ f: [String: Any] = [:]) {
         guard Shared.token != nil else { return }
         var b = f; b["t"] = "app"; b["ev"] = ev; b["v"] = v
+        if let a = b.removeValue(forKey: "at") { b["where"] = a }             // «at» на сервере — время записи: наше «где» его затирало
         if let e = b["err"] as? String { b["err"] = String(e.prefix(300)) }   // сервер не берёт записи длиннее 2000 знаков
         Task.detached(priority: .utility) { _ = try? await Api.json("/api/diag", b, timeout: 8) }
+    }
+
+    /// Ошибка коротко: без адреса запроса (в нём бывает текст фразы).
+    static func brief(_ e: Error) -> String {
+        if let f = e as? Api.Fail { return f.message }
+        let n = e as NSError
+        return "\(n.domain) \(n.code) \(n.localizedDescription)"
     }
 
     /// То же, но дождаться отправки: команда Siri работает без экрана, сразу после неё приложение засыпает.
     static func sendNow(_ ev: String, _ f: [String: Any] = [:]) async {
         guard Shared.token != nil else { return }
         var b = f; b["t"] = "app"; b["ev"] = ev; b["v"] = v
+        if let a = b.removeValue(forKey: "at") { b["where"] = a }
         _ = try? await Api.json("/api/diag", b, timeout: 5)
     }
 

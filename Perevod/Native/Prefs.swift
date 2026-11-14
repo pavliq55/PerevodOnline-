@@ -27,6 +27,14 @@ enum Pref {
     static func select() { if on { UISelectionFeedbackGenerator().selectionChanged() } }
 }
 
+/// Экран не гаснет: так выбрано в настройках, идёт запись или текст показывают собеседнику.
+@MainActor enum Awake {
+    static var pref = false
+    static var rec = false
+    static var show = 0
+    static func apply() { UIApplication.shared.isIdleTimerDisabled = pref || rec || show > 0 }
+}
+
 /// Тема: как в айфоне / светлая / тёмная — сразу для всех окон и шторок приложения.
 @MainActor enum Look {
     static func apply(_ t: Int) {

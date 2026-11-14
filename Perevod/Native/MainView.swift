@@ -1,6 +1,9 @@
 import SwiftUI
 import PhotosUI
 
+/// Отметка времени, которая не перерисовывает экран.
+final class Stamp { var at = Date.distantPast }
+
 struct MainView: View {
     /// «-demoFull 1…6» — снимки перевода на весь экран в облачной сборке: от пары слов до текста, который листается.
     private static var demoFull: Item? {
@@ -30,6 +33,7 @@ struct MainView: View {
     @State private var pull = PullUp()         // лента потянута вверх за нижний край
     @State private var shown = 60              // сколько последних реплик в ленте; остальные — по кнопке «Показать раньше»
     @State private var sel: UUID?              // старая реплика, которой коснулись: под ней те же кнопки, что у последней
+    @State private var langSwipe = Stamp()     // когда по полоске языков вели пальцем: свайп не должен ещё и открывать список
 
     var body: some View {
         ZStack {
@@ -52,6 +56,9 @@ struct MainView: View {
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(m) }
         .fullScreenCover(item: $full) { FullView(item: $0) }
         .fullScreenCover(isPresented: $showConv) { ConversationView(voice: voice).environmentObject(m) }
+        // команда «Режим разговора» (Siri, кнопка действия)
+        .onChange(of: m.wantConv) { _, w in if w { m.wantConv = false; showConv = true } }
+        .onAppear { if m.wantConv { m.wantConv = false; showConv = true } }
         .fullScreenCover(isPresented: $showCamera) { CameraPicker { img in Task { await m.translatePhoto(img) } }.ignoresSafeArea() }
         .photosPicker(isPresented: $showLibrary, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, it in
@@ -71,7 +78,7 @@ struct MainView: View {
                 .padding(.horizontal, 14).frame(height: 50).glass(Capsule(), clear: true)
             Spacer()
             GlassGroup { HStack(spacing: 4) {
-                Button { showConv = true } label: { Image(systemName: "rectangle.split.1x2").frame(width: 46, height: 46) }
+                Button { showConv = true } label: { Image(systemName: "rectangle.split.1x2").frame(width: 46, height: 46) }.accessibilityLabel("Разговор на двоих")
                 Button { showSettings = true } label: { Image(systemName: "slider.horizontal.3").frame(width: 46, height: 46) }.accessibilityLabel("Настройки")
             }.font(.system(size: 17, weight: .medium)).foregroundStyle(T.ink).padding(.horizontal, 4).frame(height: 50).glass(Capsule(), clear: true) }
         }
@@ -266,7 +273,7 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 10) {
             label(it, latest: true)
             Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
-                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
+                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { if !m.recording { full = it } }
             if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
             actions(it).padding(.top, 4)
         }
@@ -332,19 +339,23 @@ struct MainView: View {
                             .background(Capsule().fill(T.field))
                     }.transition(.opacity.combined(with: .scale(scale: 0.9)))
                 } else {
-                    Text(m.recording && m.weakNet ? "Слабый интернет…" : m.hint).font(T.label).foregroundStyle(T.dim).transition(.opacity)
+                    // длинная подсказка (сбой микрофона) — в две строки, а не обрезанная
+                    Text(m.recording && m.weakNet ? "Слабый интернет…" : m.hint).font(T.label).foregroundStyle(T.dim)
+                        .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 12).transition(.opacity)
                 }
             }
             .frame(height: 18)
             .animation(.easeInOut(duration: 0.22), value: m.undo != nil)
-            Button { showLangs = true } label: {
+            Button { if Date().timeIntervalSince(langSwipe.at) > 0.4 { showLangs = true } } label: {
                 HStack(spacing: 12) {
                     Text("Русский"); Image(systemName: "arrow.left.arrow.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(T.dim)
                     Text(m.lang.title).contentTransition(.opacity)
                 }.font(T.ui).foregroundStyle(T.ink).padding(.horizontal, 22).frame(height: 46)
             }.glass(Capsule(), clear: true)
             // свайп по полоске — вернуть прошлый язык собеседника
-            .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { v in
+            .simultaneousGesture(DragGesture(minimumDistance: 24).onChanged { _ in langSwipe.at = Date() }.onEnded { v in
+                langSwipe.at = Date()
                 if abs(v.translation.width) > 40, abs(v.translation.width) > abs(v.translation.height) * 1.5 { withAnimation(.spring(duration: 0.3)) { m.swapLang() } }
             })
             GlassGroup { HStack {
@@ -354,6 +365,7 @@ struct MainView: View {
                 MicOrb()
                 Spacer()
                 Button { showPhotoMenu = true } label: { Image(systemName: "camera").font(.system(size: 19)).frame(width: 58, height: 58) }.glass(Circle(), clear: true)
+                    .accessibilityLabel("Перевести фото")
             }.foregroundStyle(T.ink).padding(.horizontal, 30) }
         }
         .padding(.bottom, 24)
@@ -459,6 +471,7 @@ struct MicOrb: View {
                 pressed = false; pull = .zero
                 if ignoreEnd { ignoreEnd = false; return }
                 if locked { locked = false; return }
+                guard m.recording else { return }   // запись не началась (микрофон не включился) — сообщение об этом не затираем
                 // короткое касание закрепляет запись; в режиме «только держать» — нет, фраза просто заканчивается
                 if v.time.timeIntervalSince(pressAt) < 0.35, m.orbMode != 1 { m.toggleMode = true; m.hint = "Говорите… нажмите, чтобы закончить"; Hap.select() }
                 else { m.stopRec() }

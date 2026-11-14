@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AVFoundation
 
 /// Одна реплика разговора.
 struct Item: Identifiable, Codable, Equatable {
@@ -34,14 +35,17 @@ struct Item: Identifiable, Codable, Equatable {
     private(set) var prevTo = Shared.defaults.string(forKey: "prevTo") ?? ""
     /// Свайп по полоске языков: вернуться к прошлому языку собеседника.
     func swapLang() {
-        guard !recording, !prevTo.isEmpty, prevTo != to else { hint = "Выберите второй язык — потом меняйте свайпом"; return }
+        guard !recording, !arming, !phrase else { return }   // фраза ещё в работе — язык под ней не меняем
+        guard !prevTo.isEmpty, prevTo != to else { hint = "Выберите второй язык — потом меняйте свайпом"; return }
         to = prevTo
         Hap.impact()
         hint = "Нажмите и говорите"
     }
-    @Published var recording = false
+    @Published var recording = false { didSet { if recording != oldValue { Awake.rec = recording; Awake.apply() } } }   // пока идёт запись, экран не гаснет
     @Published var arming = false              // микрофон включается
     @Published var busy = false                // ждём перевод
+    private var jobs = 0 { didSet { if busy != (jobs > 0) { busy = jobs > 0 } } }   // сколько переводов в работе: фразы могут идти внахлёст
+    @Published var wantConv = false            // команда «Режим разговора» (Siri, кнопка действия) — экран откроет MainView
     @Published var phrase = false              // идёт голосовая фраза: от нажатия до готового перевода (экран в это время не перестраивается)
     @Published var liveText = ""
     @Published var typing = false              // пишут текстом: поле ввода стоит прямо в облаке
@@ -65,7 +69,7 @@ struct Item: Identifiable, Codable, Equatable {
     @Published var haptics = Pref.bool("haptics", true) { didSet { Pref.set(haptics, "haptics"); Hap.on = haptics } }
     @Published var textBig = Pref.bool("textBig", false) { didSet { Pref.set(textBig, "textBig"); T.scale = textBig ? AppModel.bigScale : 1 } }
     @Published var theme = Pref.int("theme", 0) { didSet { Pref.set(theme, "theme"); Look.apply(theme) } }           // 0 как в айфоне · 1 светлая · 2 тёмная
-    @Published var keepAwake = Pref.bool("keepAwake", false) { didSet { Pref.set(keepAwake, "keepAwake"); UIApplication.shared.isIdleTimerDisabled = keepAwake } }
+    @Published var keepAwake = Pref.bool("keepAwake", false) { didSet { Pref.set(keepAwake, "keepAwake"); Awake.pref = keepAwake; Awake.apply() } }
     @Published var showDraft = Pref.bool("showDraft", true) { didSet { Pref.set(showDraft, "showDraft"); if !showDraft { liveDraft = "" } } }
     @Published var casual = Pref.bool("casual", false) { didSet { Pref.set(casual, "casual"); applyTr(); rewarm() } } // тон: по-простому, на «ты»
     @Published var words: [Word] = Pref.words { didSet { Pref.words = words; applyTr(); rewarm() } }                  // «Мои слова»
@@ -93,7 +97,12 @@ struct Item: Identifiable, Codable, Equatable {
     private var spare: LiveSession?
     @Published private(set) var liveLang = ""   // на каком языке говорят сейчас: пусто — ещё не понятно
     @Published private(set) var liveId = UUID() // номер «живого» облака; готовая реплика получает его же — облако остаётся на месте
-    private var finalWait: CheckedContinuation<[String: Any]?, Never>?
+    // итог с сервера каждая фраза ждёт свой: начали следующую — прежняя свой перевод не теряет (журнал 13.11.2026)
+    private var waits: [ObjectIdentifier: CheckedContinuation<[String: Any]?, Never>] = [:]
+    private func resolve(_ s: LiveSession, _ j: [String: Any]?) { waits.removeValue(forKey: ObjectIdentifier(s))?.resume(returning: j) }
+    private var tail = false                   // фраза закончена, дописывается хвост последнего слова (0,17 с) — новую пока не начинаем
+    private var flipping: Set<UUID> = []       // реплики, которые сейчас переводятся в другую сторону
+    private var later: String?                 // команда пришла, пока приложение ещё открывалось — выполним, когда появится экран
     private var draftTask: Task<Void, Never>?
     private var draftText = ""
     private var expectVoice: (text: String, lang: String)?   // голос, который сервер пришлёт следом за переводом
@@ -104,7 +113,7 @@ struct Item: Identifiable, Codable, Equatable {
         load(); big = items.last?.id
         mic.onLevel = { [weak self] v in self?.heard(v) }
         Hap.on = haptics; T.scale = textBig ? AppModel.bigScale : 1; applyVoice(); applyTr()
-        UIApplication.shared.isIdleTimerDisabled = keepAwake
+        Awake.pref = keepAwake; Awake.apply()
         // только для снимков в облачной сборке: «-demoUI YES» (пример разговора), «-demoRec YES» (идёт запись),
         // «-demoFlow YES» (три фразы «как вживую» — для видео, плавно ли перестраивается экран),
         // «-demoMany YES» (длинная лента — для проверки свайпов настоящими касаниями, см. UITests)
@@ -145,7 +154,22 @@ struct Item: Identifiable, Codable, Equatable {
         }
         NotificationCenter.default.addObserver(forName: Inbox.note, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.takeInbox() } }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in guard let self, self.loggedIn else { return }; Audio.setup(); self.mic.warm(); self.takeInbox() }
+            Task { @MainActor in
+                guard let self, self.loggedIn else { return }
+                Audio.setup(); self.mic.warm(); self.takeInbox()
+                if let a = self.later { self.later = nil; self.handle(action: a) }
+            }
+        }
+        // звонок, будильник или Siri забрали звук: фразу заканчиваем, голос останавливаем (иначе он «звучит» вечно
+        // и держит очередь); звук вернули — включаем всё снова
+        NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
+            let began = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
+            let slept = (n.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt) == 1   // приложение просто спало — это не звонок
+            Task { @MainActor in
+                guard let self, self.loggedIn, !slept else { return }
+                if began { if self.recording { self.stopRec() }; self.voice.stop() }
+                else if UIApplication.shared.applicationState == .active { Audio.setup(); self.mic.warm(); self.voice.drain() }
+            }
         }
     }
 
@@ -175,12 +199,19 @@ struct Item: Identifiable, Codable, Equatable {
 
     // MARK: история
     private var file: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("history.json") }
-    private func load() { if let d = try? Data(contentsOf: file), let h = try? JSONDecoder().decode([Item].self, from: d) { items = h } }
+    private func load() {
+        guard let d = try? Data(contentsOf: file) else { return }
+        if let h = try? JSONDecoder().decode([Item].self, from: d) { items = h; return }
+        // файл не прочитался — не затираем его молча новым разговором, а откладываем рядом
+        let bad = file.deletingLastPathComponent().appendingPathComponent("history.bad.json")
+        try? FileManager.default.removeItem(at: bad)
+        try? FileManager.default.moveItem(at: file, to: bad)
+    }
     func save() {
         let cap = keep == 0 ? 60 : keep
         if items.count > cap { items = Array(items.suffix(cap)) }
         if keep == 0 { try? FileManager.default.removeItem(at: file); return }   // «не хранить»: разговор живёт, пока открыто приложение
-        try? JSONEncoder().encode(items.filter { !$0.draft }).write(to: file)
+        try? JSONEncoder().encode(items.filter { !$0.draft }).write(to: file, options: .atomic)   // целиком или никак: обрыв посреди записи не портит разговор
     }
     /// Весь разговор текстом — «Выгрузить разговор» в настройках.
     var exportText: String {
@@ -192,10 +223,10 @@ struct Item: Identifiable, Codable, Equatable {
         }
         return s
     }
-    func clear() { items = []; save() }
+    func clear() { voice.stop(); undoTask?.cancel(); undo = nil; items = []; save() }
     func remove(_ it: Item) {
         guard let i = items.firstIndex(where: { $0.id == it.id }) else { return }
-        if voice.playingId == it.id { voice.stop() }
+        voice.forget(it.id)                    // и если её голос только ждал в очереди — тоже не прозвучит
         items.remove(at: i); save()
         undo = it; undoAt = i
         undoTask?.cancel()
@@ -212,7 +243,12 @@ struct Item: Identifiable, Codable, Equatable {
         Shared.token = try await Api.login(pin: pin)
         loggedIn = true; warm()
     }
-    func logout() { Shared.token = nil; loggedIn = false; spare?.close(); spare = nil }
+    func logout() {
+        Shared.token = nil; loggedIn = false
+        spare?.close(); spare = nil; session?.close(); session = nil
+        mic.off(); voice.stop()
+        recording = false; arming = false; phrase = false; toggleMode = false; typing = false; typed = ""; liveText = ""; liveDraft = ""
+    }
 
     // MARK: запасная сессия — следующая фраза начинается мгновенно
     func warm() {
@@ -224,13 +260,14 @@ struct Item: Identifiable, Codable, Equatable {
 
     // MARK: запись
     func startRec(toggle: Bool = false) {
-        guard loggedIn, !recording, !arming, let k = Shared.token else { return }
+        guard loggedIn, !recording, !arming, !tail, let k = Shared.token else { return }
         if typing { cancelTyping() }
         let spoke = voice.playingId != nil   // только что звучал перевод — звук «до нажатия» не берём, там наш же голос
         voice.stop()
         if haptics { tapOn.impactOccurred(intensity: 0.9) }   // сразу на касание, не дожидаясь микрофона
         arming = true; toggleMode = toggle; weakNet = false
         liveText = ""; liveDraft = ""; draftText = ""; liveLang = ""; liveId = UUID()
+        draftTask?.cancel(); draftTask = nil
         let s: LiveSession
         if let sp = spare, sp.usable { s = sp } else { spare?.close(); s = LiveSession(to: to, key: k) }
         spare = nil
@@ -242,7 +279,16 @@ struct Item: Identifiable, Codable, Equatable {
             if !s.ready && Date().timeIntervalSince(self.recStart) > 3 { self.weakNet = true }
         }
         if !mic.running { Audio.setup() }
-        do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)", "route": Audio.state]); hint = error is Mic.Busy ? (Audio.live ? "Микрофон не включился. Если идёт звонок — напишите текстом" : "Микрофон занят звонком — напишите текстом") : "Микрофон не включился — разреши доступ в Настройках"; return }
+        do { try mic.start(preroll: !spoke) } catch {
+            arming = false; toggleMode = false
+            s.close(); session = nil
+            Log.send("err", ["at": "mic", "err": Log.brief(error), "route": Audio.state, "rev": mic.revives])
+            if error is Mic.Denied { hint = "Микрофон не включился — разрешите доступ в Настройках" }
+            else if !Audio.live { hint = "Микрофон занят звонком — напишите текстом" }
+            else { hint = "Микрофон не включился — нажмите ещё раз" }
+            warm()
+            return
+        }
         arming = false; phrase = true; recording = true; recStart = Date(); lastLoud = recStart; lastWord = recStart
         tapOff.prepare()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите · ↑ закрепить · ← отмена"
@@ -258,39 +304,46 @@ struct Item: Identifiable, Codable, Equatable {
         hint = "Нажмите и говорите"
         Log.send("cancel", ["recMs": Log.ms(since: recStart)])
         warm()
+        if UIApplication.shared.applicationState == .active { voice.drain() }   // голос прошлой реплики ждал конца записи
     }
 
     func stopRec() {
         guard recording else { return }
-        recording = false
+        recording = false; tail = true
         if haptics { if toggleMode { tapOn.impactOccurred(intensity: 0.7) } else { tapOff.impactOccurred(intensity: 0.7) } }
-        let s = session
+        let s = session, start = recStart
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in   // хвост последнего слова
             guard let self else { return }
+            self.tail = false
             self.mic.stop()
-            let dur = Date().timeIntervalSince(self.recStart)
+            let dur = Date().timeIntervalSince(start)
             s?.stop(diag: ["frames": self.mic.frames, "ms": Int(dur * 1000), "ready": s?.ready ?? false, "native": true,
-                           "warm": self.mic.lastWarm, "startMs": self.mic.lastStartMs, "fix": self.mic.lastFix, "peak": (self.mic.level * 1000).rounded() / 1000])
+                           "warm": self.mic.lastWarm, "startMs": self.mic.lastStartMs, "fix": self.mic.lastFix, "rev": self.mic.revives,
+                           "peak": (self.mic.level * 1000).rounded() / 1000])
             Task { await self.finish(s, dur: dur) }
             self.warm()
         }
     }
 
     private func on(_ e: LiveSession.Event, _ s: LiveSession) {
+        // итог и обрыв нужны и прежней фразе: её перевод ещё ждут, хотя уже говорят следующую
+        switch e {
+        case .final(let j):
+            if s === session, let tr = j["tr"] as? [String: Any], let out = tr["out"] as? String, let vl = j["voice"] as? String { expectVoice = (out, vl) }
+            resolve(s, j); return
+        case .error(let err): Log.send("err", ["at": "live", "err": err]); resolve(s, nil); return
+        case .closed: resolve(s, nil); return
+        default: break
+        }
         guard s === session else { return }
         switch e {
         case .live(let l, let t):
             if t != liveText { lastWord = Date() }
             liveLang = l; liveText = t
             scheduleDraft()
-        case .final(let j):
-            if let tr = j["tr"] as? [String: Any], let out = tr["out"] as? String, let vl = j["voice"] as? String { expectVoice = (out, vl) }
-            finalWait?.resume(returning: j); finalWait = nil
         case .voice(let d):
             if let e = expectVoice, d.count > 500 { voice.put(d, text: e.text, lang: e.lang); voice.drain() }
             expectVoice = nil
-        case .error(let err): Log.send("err", ["at": "live", "err": err]); finalWait?.resume(returning: nil); finalWait = nil
-        case .closed: finalWait?.resume(returning: nil); finalWait = nil
         default: break
         }
     }
@@ -302,6 +355,8 @@ struct Item: Identifiable, Codable, Equatable {
         meter.level = v
         let now = Date()
         if v > 0.3 { lastLoud = now }
+        // запись дольше 5 минут — забыли выключить (или её включила команда, а человек не заметил)
+        if recording, now.timeIntervalSince(recStart) > 300 { Log.send("autostop", ["cap": true]); stopRec(); return }
         guard autoStop, recording, toggleMode, !liveText.isEmpty else { return }
         let quiet = now.timeIntervalSince(lastLoud), still = now.timeIntervalSince(lastWord)
         if (quiet > 2 && still > 1.2) || still > 5 { Log.send("autostop", ["quietMs": Int(quiet * 1000), "stillMs": Int(still * 1000)]); stopRec() }
@@ -310,49 +365,57 @@ struct Item: Identifiable, Codable, Equatable {
     /// Черновой перевод раз в ~0,9 с, пока человек говорит.
     private func scheduleDraft() {
         guard showDraft, draftTask == nil, liveText.split(separator: " ").count >= 3, liveText != draftText else { return }
-        let text = liveText, lang = liveLang
+        let text = liveText, lang = liveLang, id = liveId
         draftText = text
         draftTask = Task {
-            if let t = try? await Api.translate(text, to: to, force: lang == "ru" ? "out" : "ru", draft: true), recording || busy { liveDraft = t.out }
+            if let t = try? await Api.translate(text, to: to, force: lang == "ru" ? "out" : "ru", draft: true), id == liveId, recording || busy { liveDraft = t.out }
             try? await Task.sleep(nanoseconds: 900_000_000)
+            guard id == liveId else { return }   // уже другая фраза — у неё свой черновик
             draftTask = nil
             if recording, liveText != draftText { scheduleDraft() }
         }
     }
 
     private func finish(_ s: LiveSession?, dur: TimeInterval) async {
-        // пока ждали перевод, человек мог начать следующую фразу — тогда её экран не трогаем
-        guard dur > 0.5, mic.pcm.count > 3000 else {
+        // пока ждём перевод, человек может начать следующую фразу: её экран не трогаем, а своё (звук, слова) берём сразу —
+        // микрофон и «живые» слова к тому времени уже будут её
+        let pcm = mic.pcm, frames = mic.frames, snapText = liveText, snapLang = liveLang
+        let cut = s?.dead ?? true            // соединение оборвалось ещё во время записи: «живые» слова неполные
+        guard dur > 0.5, pcm.count > 3000 else {
             hint = "Слишком коротко — держите кнопку, пока говорите"
-            if s === session { liveText = ""; phrase = false; busy = false }
+            if s === session { liveText = ""; liveDraft = ""; phrase = false }
+            voice.drain()
             return
         }
-        busy = true; hint = "Перевожу…"
-        defer { if s === session { busy = false; phrase = false; liveText = ""; liveDraft = "" }; voice.drain() }
+        jobs += 1; tell("Перевожу…")
+        defer { jobs -= 1; if s === session { phrase = false; liveText = ""; liveDraft = "" }; voice.drain() }
         let t0 = Date(); var path = "final"
-        // ждём итог: сервер может думать до ~6 с (Aqua + перевод); слабая связь — до 25 с
-        let fin: [String: Any]? = await withCheckedContinuation { c in
-            finalWait = c
-            DispatchQueue.main.asyncAfter(deadline: .now() + ((s?.ready ?? false) ? 12 : 4)) { [weak self] in
-                self?.finalWait?.resume(returning: nil); self?.finalWait = nil
+        // ждём итог: сервер может думать до ~6 с (Aqua + перевод). Соединения уже нет — не ждём, сразу запасной путь
+        var fin: [String: Any]?
+        if let s, !s.dead {
+            fin = await withCheckedContinuation { (c: CheckedContinuation<[String: Any]?, Never>) in
+                waits[ObjectIdentifier(s)] = c
+                DispatchQueue.main.asyncAfter(deadline: .now() + (s.ready ? 12 : 4)) { [weak self] in self?.resolve(s, nil) }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { s?.close() }   // голос приходит следом по этому же соединению
+        let mineStill = s === session
+        let live = mineStill ? liveText : snapText
         let text = (fin?["text"] as? String) ?? ""
-        let flang = (fin?["lang"] as? String) ?? liveLang
-        if let fin, text.isEmpty, mic.frames > 10 { _ = fin; hint = "Не расслышал — повторите"; return }   // тишина
+        let flang = (fin?["lang"] as? String) ?? (mineStill ? liveLang : snapLang)
+        if fin != nil, text.isEmpty, frames > 10 { tell("Не расслышал — повторите"); return }   // тишина
         do {
             var tr = Api.parseTr(fin?["tr"] as? [String: Any])
             var heard = text
             if tr == nil, !heard.isEmpty { path = "tr"; tr = try await Api.translate(heard, to: to, force: flang == "ru" ? "out" : "ru") }
             if tr == nil {
-                if !liveText.isEmpty, liveText.split(separator: " ").count >= 3 {
-                    path = "live"; heard = liveText; tr = try await Api.translate(heard, to: to)
+                if !cut, !live.isEmpty, live.split(separator: " ").count >= 3 {
+                    path = "live"; heard = live; tr = try await Api.translate(heard, to: to)
                 } else {
                     path = "stt"
-                    let r = try await Api.stt(wav: mic.wav(), to: to)
+                    let r = try await Api.stt(wav: Mic.wav(pcm), to: to)
                     heard = r.text
-                    if heard.isEmpty { hint = "Не расслышал — повторите"; return }
+                    if heard.isEmpty { tell("Не расслышал — повторите"); return }
                     if let t = r.tr { tr = t } else { tr = try await Api.translate(heard, to: to) }
                 }
             }
@@ -361,14 +424,15 @@ struct Item: Identifiable, Codable, Equatable {
             Log.send("phrase", ["recMs": Int(dur * 1000), "waitMs": Log.ms(since: t0), "path": path, "ready": s?.ready ?? false, "gotFinal": fin != nil])
             add(Item(id: s === session ? liveId : UUID(), mine: tr.mine, src: tr.mine ? "ru" : (tr.src.isEmpty ? flang : tr.src), to: tr.to, text: heard, out: tr.out))
         } catch {
-            Log.send("err", ["at": "finish/" + path, "err": "\(error)", "waitMs": Log.ms(since: t0)])
-            hint = (error as? Api.Fail)?.message == "pin" ? "Нужно войти заново" : "Нет связи — повторите"
-            if (error as? Api.Fail)?.message == "pin" { logout() }
+            Log.send("err", ["at": "finish/" + path, "err": Log.brief(error), "waitMs": Log.ms(since: t0)])
+            if (error as? Api.Fail)?.message == "pin" { logout(); hint = "Нужно войти заново" }
+            else { tell("Нет связи — повторите") }
         }
     }
 
     /// Фразы, сказанные через Siri без открытия приложения, — в ленту. Не прозвучавшую там — озвучить здесь.
     func takeInbox() {
+        guard UIApplication.shared.applicationState != .background else { return }   // без экрана не трогаем: заберём, когда откроют
         let (new, speak) = Inbox.take()
         guard !new.isEmpty else { return }
         items.append(contentsOf: new); save()
@@ -378,11 +442,20 @@ struct Item: Identifiable, Codable, Equatable {
     func add(_ it: Item) {
         items.append(it); save()
         Hap.note(.success)
-        hint = "Нажмите и говорите"
+        tell("Нажмите и говорите")
+        speak(it)
+    }
+
+    /// Подсказку под лентой меняем, только если не идёт следующая запись: у неё своя («Говорите…»).
+    private func tell(_ h: String) { if !recording { hint = h } }
+
+    /// Новую реплику озвучить, если так выбрано в настройках; иначе только скачать голос заранее.
+    private func speak(_ it: Item) {
         let lang = it.mine ? it.to : "ru"
-        voice.aim(lang == "ru")
-        if it.mine ? autoSpeak : (speakThem && !it.photo) { voice.auto(it.id, text: it.out, lang: lang) }
-        else { voice.prefetch(it.out, lang: lang) }
+        if it.mine ? autoSpeak : (speakThem && !it.photo) {
+            if !recording, !arming { voice.aim(lang == "ru") }   // звук поворачиваем заранее, только если голос прозвучит прямо сейчас
+            voice.auto(it.id, text: it.out, lang: lang)
+        } else { voice.prefetch(it.out, lang: lang) }
     }
 
     // MARK: текст, фото, «наоборот»
@@ -401,8 +474,8 @@ struct Item: Identifiable, Codable, Equatable {
         typing = false; typed = ""
         guard !t.isEmpty else { return }
         let id = liveId
-        liveText = t; liveDraft = ""; liveLang = ""; phrase = true; busy = true; hint = "Перевожу…"
-        defer { busy = false; if liveId == id { phrase = false; liveText = "" } }
+        liveText = t; liveDraft = ""; liveLang = ""; phrase = true; jobs += 1; hint = "Перевожу…"
+        defer { jobs -= 1; if liveId == id { phrase = false; liveText = "" } }
         if voice.demo {   // показ на видео: сети нет
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             add(Item(id: id, mine: true, src: "ru", to: to, text: t, out: "Bisa bayar pakai kartu?")); return
@@ -411,30 +484,53 @@ struct Item: Identifiable, Codable, Equatable {
             let r = try await Api.translate(t, to: to)
             add(Item(id: liveId == id ? id : UUID(), mine: r.mine, src: r.mine ? "ru" : r.src, to: r.to, text: t, out: r.out))
         } catch {
-            Log.send("err", ["at": "typed", "err": "\(error)"]); hint = "Не получилось перевести — повторите"
+            Log.send("err", ["at": "typed", "err": Log.brief(error)]); tell("Не получилось перевести — повторите")
             // написанное не теряется: облако снова с текстом, можно нажать «Перевести» ещё раз
             if liveId == id, !recording, !arming { phrase = false; liveText = ""; typed = t; typing = true }
         }
     }
 
     func translatePhoto(_ img: UIImage) async {
-        busy = true; hint = "Читаю текст на фото…"; defer { busy = false }
+        jobs += 1; tell("Читаю текст на фото…"); defer { jobs -= 1 }
         let k = min(1, 1280 / max(img.size.width, img.size.height))
         let size = CGSize(width: img.size.width * k, height: img.size.height * k)
-        let small = UIGraphicsImageRenderer(size: size).image { _ in img.draw(in: CGRect(origin: .zero, size: size)) }
+        let f = UIGraphicsImageRendererFormat(); f.scale = 1   // иначе снимок выходит втрое крупнее (экран ×3) — и втрое дольше уходит
+        let small = UIGraphicsImageRenderer(size: size, format: f).image { _ in img.draw(in: CGRect(origin: .zero, size: size)) }
         guard let jpg = small.jpegData(compressionQuality: 0.75) else { return }
         do { let o = try await Api.photo(jpeg: jpg); add(Item(mine: false, src: "", to: "ru", text: "📷 Фото", out: o, photo: true)) }
-        catch { Log.send("err", ["at": "photo", "err": "\(error)"]); hint = error.localizedDescription }
+        catch {
+            Log.send("err", ["at": "photo", "err": Log.brief(error)])
+            if (error as? Api.Fail)?.message == "pin" { logout(); hint = "Нужно войти заново" }
+            else { tell(error is Api.Fail ? error.localizedDescription : "Нет связи — повторите") }
+        }
     }
 
     func flip(_ it: Item) async {
-        busy = true; defer { busy = false }
+        guard !flipping.contains(it.id) else { return }   // нажали дважды — второй раз не переводим
+        flipping.insert(it.id); jobs += 1
+        defer { flipping.remove(it.id); jobs -= 1 }
         do {
             let r = try await Api.translate(it.text, to: it.mine ? to : (Langs.all.contains { $0.id == it.src } ? it.src : to), force: it.mine ? "ru" : "out")
-            remove(it); add(Item(mine: r.mine, src: r.mine ? "ru" : r.src, to: r.to, text: it.text, out: r.out))
-        } catch { Log.send("err", ["at": "flip", "err": "\(error)"]); hint = "Не получилось — повторите" }
+            // реплика остаётся на своём месте, меняется только перевод (раньше она «удалялась» и вставала в конец)
+            guard let i = items.firstIndex(where: { $0.id == it.id }) else { return }   // пока переводили, её удалили
+            voice.forget(it.id)
+            var n = items[i]
+            n.mine = r.mine; n.src = r.mine ? "ru" : r.src; n.to = r.to; n.out = r.out
+            items[i] = n; save()
+            Hap.note(.success)
+            speak(n)
+        } catch { Log.send("err", ["at": "flip", "err": Log.brief(error)]); tell("Не получилось — повторите") }
     }
 
     // MARK: Siri / кнопка действия
-    func handle(action: String) { if action == "listen" { startRec(toggle: true) } }
+    func handle(action: String) {
+        guard loggedIn else { return }
+        // приложение ещё открывается: микрофон в этот момент не включится — ждём, когда появится экран
+        guard UIApplication.shared.applicationState == .active else { later = action; return }
+        switch action {
+        case "listen": if recording { stopRec() } else { startRec(toggle: true) }   // второе нажатие кнопки — конец фразы
+        case "conv": wantConv = true
+        default: break
+        }
+    }
 }
