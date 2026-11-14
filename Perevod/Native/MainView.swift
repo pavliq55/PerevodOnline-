@@ -29,6 +29,7 @@ struct MainView: View {
     @State private var tail: UUID?             // последняя реплика, которую лента уже показала
     @State private var pull = PullUp()         // лента потянута вверх за нижний край
     @State private var shown = 60              // сколько последних реплик в ленте; остальные — по кнопке «Показать раньше»
+    @State private var sel: UUID?              // старая реплика, которой коснулись: под ней те же кнопки, что у последней
 
     var body: some View {
         ZStack {
@@ -113,16 +114,27 @@ struct MainView: View {
                 .animation(.smooth(duration: 0.35), value: m.phrase)
                 .animation(.smooth(duration: 0.3), value: m.liveLang)
                 .animation(.smooth(duration: 0.35), value: m.items.count)
+                .animation(.smooth(duration: 0.3), value: sel)
             }
+            // под верхними капсулами и часами лента тает: текст не лезет на них
+            .mask { VStack(spacing: 0) {
+                LinearGradient(stops: [.init(color: Color.clear, location: 0), .init(color: Color.clear, location: 0.5), .init(color: Color.black, location: 1)],
+                               startPoint: .top, endPoint: .bottom).frame(height: 66)
+                Color.black
+            }.padding(.bottom, -120) }
             .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)
-            .onChange(of: m.phrase) { _, on in if on { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
+            .onChange(of: m.phrase) { _, on in if on { sel = nil; withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
             // к нижнему краю ведём только за новой репликой; удаление и возврат реплики ленту не двигают
             .onChange(of: m.items.count) { was, now in
-                if now > was, m.items.last?.id != tail { withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } }
+                if now > was, m.items.last?.id != tail { sel = nil; withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } }
                 tail = m.items.last?.id
             }
-            .onAppear { tail = m.items.last?.id }
+            .onAppear {
+                tail = m.items.last?.id
+                let n = UserDefaults.standard.integer(forKey: "demoSel")   // «-demoSel N» — снимок: открыта N-я реплика с конца
+                if n >= 1, n <= m.items.count { sel = m.items[m.items.count - n].id }
+            }
             // потянуть ленту вверх за нижний край и отпустить — последний перевод на весь экран (смахнуть вниз — закрыть)
             .onScrollPhaseChange { was, now in
                 let on = now == .interacting || now == .tracking
@@ -175,24 +187,27 @@ struct MainView: View {
     }
 
     /// Одно облако на всю жизнь реплики: пока говорят → готовый перевод крупно → обычная реплика выше.
+    /// Коснулись обычной реплики — под ней появляются те же кнопки, что у последней; ещё раз — убираются.
     private func cell(_ it: Item, live: Bool) -> some View {
         let big = live || it.id == m.big
-        return bubble(it, side: big ? 22 : 48) {
+        let open = !big && it.id == sel
+        return bubble(it, side: big || open ? 22 : 48) {
             ZStack(alignment: .topLeading) {
                 if live { liveBody(it).transition(.opacity) }
                 else if big { latestBody(it).transition(.opacity) }
-                else { rowBody(it).transition(.opacity) }
+                else { rowBody(it, open: open).transition(.opacity) }
             }
         }
-        .onTapGesture { if !live && !big { full = it } }   // касание по переводу — на весь экран
+        .onTapGesture { if !live && !big { sel = open ? nil : it.id; Hap.select() } }
         .contextMenu { if !live { menu(it) } }
     }
 
-    private func rowBody(_ it: Item) -> some View {
+    private func rowBody(_ it: Item, open: Bool) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             label(it)
-            Text(it.text).font(T.small).foregroundStyle(T.dim).lineLimit(4)
+            Text(it.text).font(T.small).foregroundStyle(T.dim).lineLimit(open ? nil : 4)
             Text(it.out).font(T.text).foregroundStyle(T.ink)
+            if open { actions(it).padding(.top, 9).transition(.opacity) }
         }
     }
 
@@ -202,19 +217,25 @@ struct MainView: View {
             Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { full = it }
             if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
-            HStack(spacing: 8) {
-                chip("doc.on.doc") { UIPasteboard.general.string = it.out; Hap.note(.success) }
-                if !it.photo { chip("arrow.triangle.2.circlepath") { Task { await m.flip(it) } } }
-                Spacer()
-                Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
-                    Label(voice.playingId == it.id ? "Стоп" : voice.loadingId == it.id ? "Готовлю…" : "Озвучить",
-                          systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
-                        .font(T.ui).frame(minWidth: 104).padding(.horizontal, 16).frame(height: 42)   // ширина не прыгает при смене надписи
-                        .background(Capsule().fill(T.speakTint))
-                }
-            }
-            .foregroundStyle(T.ink).padding(.top, 4)
+            actions(it).padding(.top, 4)
         }
+    }
+
+    /// Кнопки реплики: копировать · перевести в другую сторону · на весь экран · озвучить.
+    private func actions(_ it: Item) -> some View {
+        HStack(spacing: 8) {
+            chip("doc.on.doc") { UIPasteboard.general.string = it.out; Hap.note(.success) }.accessibilityLabel("Копировать")
+            if !it.photo { chip("arrow.triangle.2.circlepath") { Task { await m.flip(it) } }.accessibilityLabel("Перевести в другую сторону") }
+            chip("arrow.up.left.and.arrow.down.right") { full = it }.accessibilityLabel("На весь экран")
+            Spacer(minLength: 4)
+            Button { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") } label: {
+                Label(voice.playingId == it.id ? "Стоп" : voice.loadingId == it.id ? "Готовлю…" : "Озвучить",
+                      systemImage: voice.playingId == it.id ? "stop.fill" : "speaker.wave.2.fill")
+                    .font(T.ui).frame(minWidth: 104).padding(.horizontal, 16).frame(height: 42)   // ширина не прыгает при смене надписи
+                    .background(Capsule().fill(T.speakTint))
+            }
+        }
+        .foregroundStyle(T.ink)
     }
 
     @ViewBuilder private func menu(_ it: Item) -> some View {

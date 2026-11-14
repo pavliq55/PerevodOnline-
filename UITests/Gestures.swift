@@ -103,6 +103,17 @@ final class Gestures: XCTestCase {
             if done.exists { done.tap() } else { XCTFail("нет «Готово»") }
             sleep(1)
         } else { XCTFail("нет кнопки настроек") }
+        step("15 коснуться обычной реплики — под ней кнопки; озвучить оттуда; коснуться ещё раз — кнопки убрались")
+        b = bubbles()
+        if b.count > 2 {
+            let r = b[b.count - 3]
+            at(r.midX, r.midY).tap(); sleep(2)
+            let say = app.buttons.matching(identifier: "Озвучить")
+            if say.count < 2 { XCTFail("кнопки под обычной репликой не появились: \(say.count)") } else { say.element(boundBy: 0).tap(); sleep(4) }
+            b = bubbles()
+            if b.count > 2 { let r2 = b[b.count - 3]; at(r2.midX, r2.minY + 24).tap(); sleep(2) }
+            if app.buttons.matching(identifier: "Озвучить").count != 1 { XCTFail("кнопки не убрались") }
+        }
         step("конец")
     }
 }
