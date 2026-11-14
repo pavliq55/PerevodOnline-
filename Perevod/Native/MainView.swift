@@ -2,13 +2,26 @@ import SwiftUI
 import PhotosUI
 
 struct MainView: View {
+    /// «-demoFull 1…6» — снимки перевода на весь экран в облачной сборке: от пары слов до текста, который листается.
+    private static var demoFull: Item? {
+        let long = "Halo, mengapa Anda memegang syal? Mereka mungkin sudah berpikir bahwa itu harus. Saya... Bolehkah saya menuliskan bahwa ini milik kami yang terlihat pada bola? Kepada siapa harus menulis? Ini untuk saya, yog. Ini untuk saya, informasi."
+        let texts = ["Baik, sampai besok",
+                     "Bisa ambil motornya besok pagi sekitar jam delapan?",
+                     "Bisa ambil motornya besok pagi sekitar jam delapan dan kembalikan seminggu lagi? Nanti saya bayar tunai.",
+                     long,
+                     long + " " + long + " " + long + " " + long,
+                     "Здравствуйте! Мы открываемся в восемь утра. Достаточно копии паспорта и залога, второй шлем дадим бесплатно."]
+        let n = UserDefaults.standard.integer(forKey: "demoFull")
+        guard n >= 1, n <= texts.count else { return nil }
+        return Item(mine: n != 6, src: n != 6 ? "ru" : "id", to: n != 6 ? "id" : "ru", text: "", out: texts[n - 1])
+    }
     @EnvironmentObject var m: AppModel
     @ObservedObject var voice: Voice
     @State private var showLangs = false
     @State private var showSettings = UserDefaults.standard.integer(forKey: "demoSettings") > 0   // «-demoSettings N» — снимок настроек в облачной сборке
     @State private var showType = false
     @State private var showConv = false
-    @State private var full: Item?
+    @State private var full: Item? = MainView.demoFull
     @State private var photoItem: PhotosPickerItem?
     @State private var showCamera = false
     @State private var showPhotoMenu = false

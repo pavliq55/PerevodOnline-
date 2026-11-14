@@ -42,24 +42,189 @@ struct TypeSheet: View {
     }
 }
 
-/// Перевод на весь экран — показать собеседнику; можно перевернуть к нему.
+/// Перевод на весь экран — показать собеседнику. Текст всегда стоит НАД кнопками и занимает всё место:
+/// пара слов — «плакатом» по центру; фраза — обычным начертанием от края (в строку входит больше — буквы крупнее);
+/// совсем длинный текст листается. Размер подбирается сам: самый крупный, при котором всё помещается и слова не рвутся.
 struct FullView: View {
     let item: Item
     @Environment(\.dismiss) var dismiss
-    @State private var flipped = false
+    @State private var flipped = UserDefaults.standard.bool(forKey: "demoFlip")   // «-demoFlip YES» — снимок в облачной сборке
     var body: some View {
         ZStack {
-            AuraBackground(rich: true, veil: .center)
-            Text(item.out).font(.system(size: 56, weight: .semibold).width(.expanded)).minimumScaleFactor(0.3)
-                .multilineTextAlignment(.center).foregroundStyle(T.ink).padding(28)
-                .rotationEffect(.degrees(flipped ? 180 : 0)).animation(.spring, value: flipped)
-            VStack { Spacer(); GlassGroup { HStack(spacing: 14) {
-                Button { flipped.toggle() } label: { Label("Перевернуть", systemImage: "arrow.uturn.down").font(T.ui).padding(.horizontal, 20).frame(height: 50) }.glass(Capsule(), clear: true)
-                Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 18, weight: .semibold)).frame(width: 50, height: 50) }.glass(Circle(), clear: true)
-            }.foregroundStyle(T.ink) }.padding(.bottom, 30) }
+            AuraBackground(rich: true, veil: .read)
+            VStack(spacing: 14) {
+                FitText(text: item.out, lang: item.mine ? item.to : "ru")
+                    .rotationEffect(.degrees(flipped ? 180 : 0)).animation(.spring, value: flipped)
+                    .padding(.horizontal, 22).padding(.top, 10)
+                GlassGroup { HStack(spacing: 14) {
+                    Button { flipped.toggle() } label: { Label("Перевернуть", systemImage: "arrow.uturn.down").font(T.ui).padding(.horizontal, 20).frame(height: 50) }.glass(Capsule(), clear: true)
+                    Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 18, weight: .semibold)).frame(width: 50, height: 50) }.glass(Circle(), clear: true)
+                }.foregroundStyle(T.ink) }.padding(.bottom, 14)
+            }
         }
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 30).onEnded { v in if v.translation.height > 90 { dismiss() } })   // смахнуть вниз — закрыть
+        // пока текст показывают человеку, экран не гаснет
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = Pref.bool("keepAwake", false) }
+    }
+}
+
+/// Текст во всю отведённую область. Перебирает размеры от крупного к мелкому и берёт первый, с которым текст
+/// помещается по высоте; ни один не подошёл — текст листается самым мелким из них (32 — всё ещё вдвое крупнее обычного).
+struct FitText: View {
+    let text: String
+    let lang: String
+    private let parts: [String]
+    @Environment(\.colorScheme) private var scheme
+
+    fileprivate struct Spec { var size: CGFloat; var poster = false; var split = false }
+    private static let posterSizes: [CGFloat] = [96, 84, 72, 64, 56, 48]
+    private static let readSizes: [CGFloat] = [52, 48, 44, 40, 38, 36, 34, 32]
+    private static let minSize: CGFloat = 32
+    private static let rtl: Set<String> = ["ar", "he", "fa", "ur"]
+    private static let noSpaces: Set<String> = ["zh", "ja", "th", "lo", "km", "my"]          // пишут без пробелов — строка рвётся где угодно
+    private static let tall: Set<String> = ["th", "ar", "fa", "ur", "hi", "bn", "ta", "km", "lo", "my"]   // высокие знаки — строкам нужен воздух
+
+    init(text: String, lang: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.text = t; self.lang = lang; self.parts = FitText.sentences(t)
+    }
+
+    private var code: String { String(lang.prefix(2)) }
+
+    var body: some View {
+        GeometryReader { g in
+            let c = specs(g.size.width)
+            ViewThatFits(in: .vertical) {
+                page(c[0])
+                page(c[1])
+                page(c[2])
+                page(c[3])
+                page(c[4])
+                page(c[5])
+                page(c[6])
+                page(c[7])
+                ViewThatFits(in: .vertical) {
+                    page(c[8])
+                    page(c[9])
+                    page(c[10])
+                    page(c[11])
+                    page(c[12])
+                    page(c[13])
+                    page(c[14])
+                    page(c[15])
+                    LongText(step: c[16].size) { page(c[16]) }
+                }
+            }
+            .frame(width: g.size.width, height: g.size.height)
+        }
+        .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+        .environment(\.layoutDirection, FitText.rtl.contains(code) ? .rightToLeft : .leftToRight)
+    }
+
+    @ViewBuilder private func page(_ s: Spec) -> some View {
+        let air: CGFloat = FitText.tall.contains(code) ? 0.2 : 0
+        if s.poster {
+            Text(text).font(.system(size: s.size, weight: .semibold).width(.expanded)).lineSpacing(s.size * air)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 6).frame(maxWidth: .infinity)
+        } else {
+            // в тёмной теме чуть тоньше: белое на чёрном «расплывается»
+            let w: Font.Weight = scheme == .dark ? .medium : .semibold
+            VStack(alignment: .leading, spacing: s.size * 0.4) {
+                ForEach(Array((s.split ? parts : [text]).enumerated()), id: \.offset) { _, p in
+                    Text(p).font(.system(size: s.size, weight: w)).lineSpacing(s.size * (air + 0.04))
+                        .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 16 вариантов «помещается целиком» по убыванию и 17-й — для прокрутки.
+    private func specs(_ width: CGFloat) -> [Spec] {
+        // самое широкое слово должно входить в строку целиком — иначе его разорвёт посередине
+        let words = text.split(whereSeparator: { $0.isWhitespace }).prefix(400).map(String.init)
+        let free = FitText.noSpaces.contains(code) || words.isEmpty || words.contains(where: { $0.count > 26 })
+        func cap(_ f: UIFont, _ room: CGFloat) -> CGFloat {
+            if free { return 999 }
+            var w: CGFloat = 1
+            for x in words { w = max(w, (x as NSString).size(withAttributes: [.font: f]).width) }
+            return (room / w * 100 * 0.97).rounded(.down)
+        }
+        let capP = cap(UIFont.systemFont(ofSize: 100, weight: .semibold, width: .expanded), width - 12)
+        let capR = cap(UIFont.systemFont(ofSize: 100, weight: .semibold), width)
+        let lo = FitText.minSize
+        let r: [CGFloat] = FitText.readSizes.map { max(min($0, capR), lo) }
+        var out: [Spec] = []
+        if text.count <= 40 {
+            // пара слов — «плакат»
+            for s in FitText.posterSizes where min(s, capP) >= 48 { out.append(Spec(size: min(s, capP), poster: true)) }
+            for s in r where s <= 44 { out.append(Spec(size: s)) }
+        } else if parts.count < 2 {
+            for s in r { out.append(Spec(size: s)) }
+        } else {
+            // каждое предложение с новой строки — если это стоит не больше одной ступени размера
+            for i in r.indices {
+                out.append(Spec(size: r[i], split: true))
+                if i >= 1 { out.append(Spec(size: r[i - 1])) }
+            }
+            out.append(Spec(size: lo))
+        }
+        out = Array(out.prefix(16))
+        while out.count < 16 { out.append(out.last ?? Spec(size: lo)) }
+        out.append(Spec(size: lo, split: parts.count >= 2))
+        return out
+    }
+
+    /// Предложения по отдельности; обрывок вроде «Да.» или «Saya…» остаётся на строке со следующим.
+    private static func sentences(_ text: String) -> [String] {
+        var out: [String] = []
+        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .bySentences) { (s: String?, _: Range<String.Index>, _: Range<String.Index>, _: inout Bool) in
+            let t = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { return }
+            if let last = out.last, last.count < 16 { out[out.count - 1] = last + " " + t } else { out.append(t) }
+        }
+        return out.isEmpty ? [text] : out
+    }
+}
+
+/// Длинный текст листается: край, за которым есть продолжение, тает, а внизу — стрелка «дальше» (листает на экран),
+/// пока есть что читать: её поймёт и тот, кому телефон только что протянули.
+private struct LongText<C: View>: View {
+    let step: CGFloat                          // размер букв: при листании пара строк прежнего экрана остаётся видна
+    @ViewBuilder var content: C
+    @State private var pos = ScrollPosition(edge: .top)
+    @State private var y: CGFloat = 0          // сколько прокручено
+    @State private var rest: CGFloat = 100     // сколько текста ещё ниже экрана
+    @State private var page: CGFloat = 400     // высота окна с текстом
+
+    var body: some View {
+        let more = rest > 6
+        ScrollView { content.padding(.top, 4).padding(.bottom, 72) }
+            .scrollPosition($pos)
+            .scrollIndicators(.visible)
+            .onScrollGeometryChange(for: [CGFloat].self) { g in
+                [g.contentOffset.y.rounded(), (g.contentSize.height - g.containerSize.height - g.contentOffset.y).rounded(), g.containerSize.height.rounded()]
+            } action: { _, v in
+                y = v[0]; rest = v[1]; page = v[2]
+            }
+            .mask(LinearGradient(stops: [.init(color: Color.black.opacity(y > 6 ? 0 : 1), location: 0), .init(color: Color.black, location: 0.07),
+                                         .init(color: Color.black, location: 0.86), .init(color: Color.black.opacity(more ? 0 : 1), location: 1)],
+                                 startPoint: .top, endPoint: .bottom))
+            .overlay(alignment: .bottom) {
+                if more {
+                    Button {
+                        let to = y + min(rest, max(120, page - step * 3))
+                        withAnimation(.smooth(duration: 0.45)) { pos.scrollTo(y: to) }
+                    } label: {
+                        Image(systemName: "chevron.down").font(.system(size: 19, weight: .bold)).frame(width: 50, height: 50)
+                    }
+                    .glass(Circle(), clear: true).accessibilityLabel("Дальше").transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: more)
     }
 }
 

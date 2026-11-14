@@ -148,7 +148,7 @@ struct Orb: View {
 /// Мягкие пятна света — стеклу есть что преломлять. Две темы: светлая и тёмная (те же пятна, но глубже и тише).
 /// Вуаль — полоса цвета основы там, где лежит текст: пятна остаются у панелей, а текст читается в любой точке.
 struct AuraBackground: View {
-    enum Veil { case none, feed, center }
+    enum Veil { case none, feed, center, read }
     var rich = false
     var veil: Veil = .feed
     @Environment(\.colorScheme) private var scheme
@@ -170,6 +170,7 @@ struct AuraBackground: View {
             case .none: EmptyView()
             case .feed: shade(d ? 0.55 : 0.3, 0.12, 0.22, 0.62, 0.76)
             case .center: shade(d ? 0.6 : 0.35, 0.05, 0.15, 0.85, 0.95)
+            case .read: shade(d ? 0.8 : 0.82, 0, 0.06, 0.86, 0.97)    // перевод на весь экран: под текстом почти ровный фон — читается и на солнце
             }
         }.ignoresSafeArea()
     }

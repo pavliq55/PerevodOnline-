@@ -55,6 +55,12 @@ jobs:
               xcrun simctl launch "$UDID" com.pavliq55.tapny -demoUI YES -demoSettings $n; sleep 6
               xcrun simctl io "$UDID" screenshot shots/$th-settings$n.png
             done
+            # перевод на весь экран: от пары слов до текста, который листается
+            for n in 1 2 3 4 5 6; do
+              xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
+              xcrun simctl launch "$UDID" com.pavliq55.tapny -demoUI YES -demoFull $n; sleep 5
+              xcrun simctl io "$UDID" screenshot shots/$th-full$n.png
+            done
           done
           xcrun simctl ui "$UDID" appearance light
           # крупный текст и тёмная тема из настроек (айфон при этом в светлой)
@@ -64,6 +70,9 @@ jobs:
           xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
           xcrun simctl launch "$UDID" com.pavliq55.tapny -demoRec YES -demoBig YES; sleep 5
           xcrun simctl io "$UDID" screenshot shots/big-light-demoRec.png
+          xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
+          xcrun simctl launch "$UDID" com.pavliq55.tapny -demoUI YES -demoFull 4 -demoFlip YES; sleep 5
+          xcrun simctl io "$UDID" screenshot shots/light-full4-flip.png
           ls -la shots
       - uses: actions/upload-artifact@v4
         if: always()
