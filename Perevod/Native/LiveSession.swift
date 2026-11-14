@@ -113,6 +113,7 @@ final class Mic {
     private var peak: Int16 = 0
     private(set) var lastWarm = false
     private(set) var lastStartMs = 0
+    private(set) var lastFix = 0       // сколько раз пришлось «чинить» микрофон при включении: 1 — новый движок, 2 — ещё и звук заново
     var level: Double { Double(peak) / 32768 }   // громкость записи 0…1 — в журнал: тишина это или сервер не расслышал
     private static let keep: TimeInterval = 45
 
@@ -127,16 +128,21 @@ final class Mic {
         }
     }
 
-    /// Микрофон занят: идёт звонок (телефон, Telegram, WhatsApp) — айфон отдаёт микрофон только ему.
+    /// Микрофон не отдаёт звук: идёт звонок (телефон, Telegram, WhatsApp) — айфон отдаёт микрофон только ему.
     struct Busy: Error {}
 
-    private func run() throws {
+    /// deep — нажали на шар: если микрофон молчит, пробуем всё, вплоть до включения звука заново.
+    private func run(deep: Bool = false) throws {
         guard !engine.isRunning else { return }
+        lastFix = 0
         var input = engine.inputNode
         var inFmt = input.outputFormat(forBus: 0)
-        // «пустой» формат (0 Гц) бывает и без звонка — после смены наушники ↔ динамик; тогда выручает новый движок
-        if inFmt.sampleRate <= 0 || inFmt.channelCount == 0 {
+        // «пустой» формат (0 Гц) бывает и без звонка (14.11.2026; причина не найдена, помогал перезапуск приложения):
+        // сначала новый движок, если не помог — включаем звук заново
+        while (inFmt.sampleRate <= 0 || inFmt.channelCount == 0) && lastFix < (deep ? 2 : 1) {
+            if lastFix == 1 { Audio.restart() }
             engine = AVAudioEngine(); input = engine.inputNode; inFmt = input.outputFormat(forBus: 0)
+            lastFix += 1
         }
         // во время звонка формат так и остаётся пустым — с ним installTap роняет приложение прямо при открытии
         guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else { throw Busy() }
@@ -160,7 +166,7 @@ final class Mic {
         let t0 = Date()
         lastWarm = engine.isRunning
         pcm = Data(); frames = 0; peak = 0
-        if !lastWarm { ring.removeAll(); try run() }
+        if !lastWarm { ring.removeAll(); try run(deep: true) }
         lastStartMs = Int(Date().timeIntervalSince(t0) * 1000)
         capturing = true
         if preroll { for c in ring { frames += 1; pcm.append(c.raw); onChunk?(c.ulaw) } }

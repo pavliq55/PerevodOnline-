@@ -242,7 +242,7 @@ struct Item: Identifiable, Codable, Equatable {
             if !s.ready && Date().timeIntervalSince(self.recStart) > 3 { self.weakNet = true }
         }
         if !mic.running { Audio.setup() }
-        do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)", "route": Audio.state]); hint = error is Mic.Busy ? "Микрофон занят звонком — напишите текстом" : "Микрофон не включился — разреши доступ в Настройках"; return }
+        do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)", "route": Audio.state]); hint = error is Mic.Busy ? (Audio.live ? "Микрофон не включился. Если идёт звонок — напишите текстом" : "Микрофон занят звонком — напишите текстом") : "Микрофон не включился — разреши доступ в Настройках"; return }
         arming = false; phrase = true; recording = true; recStart = Date(); lastLoud = recStart; lastWord = recStart
         tapOff.prepare()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите · ↑ закрепить · ← отмена"
@@ -270,7 +270,7 @@ struct Item: Identifiable, Codable, Equatable {
             self.mic.stop()
             let dur = Date().timeIntervalSince(self.recStart)
             s?.stop(diag: ["frames": self.mic.frames, "ms": Int(dur * 1000), "ready": s?.ready ?? false, "native": true,
-                           "warm": self.mic.lastWarm, "startMs": self.mic.lastStartMs, "peak": (self.mic.level * 1000).rounded() / 1000])
+                           "warm": self.mic.lastWarm, "startMs": self.mic.lastStartMs, "fix": self.mic.lastFix, "peak": (self.mic.level * 1000).rounded() / 1000])
             Task { await self.finish(s, dur: dur) }
             self.warm()
         }

@@ -49,6 +49,7 @@ enum Audio {
     /// 3 — перевод для меня в наушники, перевод для собеседника — из громкого динамика.
     static var out = Shared.defaults.integer(forKey: "output")
     private static var forced = false
+    private(set) static var live = true      // звук включился; нет — его держит звонок
     private static var ownMic = false
     /// toMe — кому сейчас прозвучит голос: мне (true) или собеседнику (false); nil — голоса нет (запись, запуск).
     /// Ответ — включился ли звук (без экрана, из команды Siri, может и не включиться).
@@ -62,6 +63,7 @@ enum Audio {
         try? s.setAllowHapticsAndSystemSoundsDuringRecording(true)   // иначе при включённом микрофоне айфон глушит всю вибрацию
         var ok = true
         do { try s.setActive(true) } catch { ok = false }
+        live = ok
         // «мне — в наушники»: айфон лежит между нами — слушает его микрофон, а не гарнитура
         if out == 3 {
             if s.preferredInput?.portType != .builtInMic, let m = s.availableInputs?.first(where: { $0.portType == .builtInMic }) { try? s.setPreferredInput(m) }
@@ -73,11 +75,18 @@ enum Audio {
         return ok
     }
 
+    /// Микрофон молчит, а звонка нет (14.11.2026: «занят звонком» без звонка, помог только перезапуск приложения) —
+    /// выключаем звук и включаем заново.
+    @discardableResult static func restart() -> Bool {
+        try? AVAudioSession.sharedInstance().setActive(false)
+        return setup()
+    }
+
     /// Что сейчас со звуком — в журнал, когда микрофон не включился.
     static var state: String {
         let s = AVAudioSession.sharedInstance()
         let i = s.currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: "+")
         let o = s.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: "+")
-        return "in=\(i) out=\(o) sr=\(Int(s.sampleRate)) other=\(s.isOtherAudioPlaying) mode=\(out)"
+        return "in=\(i) out=\(o) sr=\(Int(s.sampleRate)) other=\(s.isOtherAudioPlaying) live=\(live) mode=\(out)"
     }
 }
