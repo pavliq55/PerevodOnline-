@@ -44,6 +44,8 @@ struct Item: Identifiable, Codable, Equatable {
     @Published var busy = false                // ждём перевод
     @Published var phrase = false              // идёт голосовая фраза: от нажатия до готового перевода (экран в это время не перестраивается)
     @Published var liveText = ""
+    @Published var typing = false              // пишут текстом: поле ввода стоит прямо в облаке
+    @Published var typed = ""
     @Published var liveDraft = ""
     @Published var hint = "Нажмите и говорите" {
         didSet {   // всё, что не обычная подсказка, — сбой, который увидел человек: в журнал
@@ -123,6 +125,7 @@ struct Item: Identifiable, Codable, Equatable {
                           Item(mine: true, src: "ru", to: "id", text: "Хорошо, тогда до завтра", out: "Baik, sampai besok")]
             }
             big = items.last?.id
+            if ud.bool(forKey: "demoType") { typing = true; typed = "Можно оплатить картой?" }   // «-demoType YES» — снимок: пишут текстом
             if ud.bool(forKey: "demoFlow") { Task { await demoFlow() } }
             if ud.bool(forKey: "demoBusy") { liveLang = "ru"; phrase = true; busy = true; hint = "Перевожу…"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
             if ud.bool(forKey: "demoLocked") { liveLang = "ru"; meter.level = 0.5; phrase = true; recording = true; toggleMode = true; recStart = Date().addingTimeInterval(-22); hint = "Говорите… нажмите, чтобы закончить"; liveText = "Можно забрать завтра утром"; liveDraft = "Bisa diambil besok pagi?" }
@@ -216,6 +219,7 @@ struct Item: Identifiable, Codable, Equatable {
     // MARK: запись
     func startRec(toggle: Bool = false) {
         guard loggedIn, !recording, !arming, let k = Shared.token else { return }
+        if typing { cancelTyping() }
         let spoke = voice.playingId != nil   // только что звучал перевод — звук «до нажатия» не берём, там наш же голос
         voice.stop()
         if haptics { tapOn.impactOccurred(intensity: 0.9) }   // сразу на касание, не дожидаясь микрофона
@@ -367,11 +371,35 @@ struct Item: Identifiable, Codable, Equatable {
     }
 
     // MARK: текст, фото, «наоборот»
-    func translateTyped(_ text: String) async {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines); guard !t.isEmpty else { return }
-        busy = true; defer { busy = false }
-        do { let r = try await Api.translate(t, to: to); add(Item(mine: r.mine, src: r.mine ? "ru" : r.src, to: r.to, text: t, out: r.out)) }
-        catch { Log.send("err", ["at": "typed", "err": "\(error)"]); hint = "Не получилось перевести — повторите" }
+    /// Пишут текстом: слова набираются прямо в облаке в конце ленты — в нём же потом встанет перевод.
+    func startTyping() {
+        guard loggedIn, !phrase, !busy, !recording, !arming else { return }
+        voice.stop()
+        typed = ""; liveText = ""; liveDraft = ""; liveLang = ""; liveId = UUID(); typing = true
+    }
+
+    func cancelTyping() { typing = false; typed = "" }
+
+    func sendTyped() async {
+        guard typing else { return }
+        let t = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        typing = false; typed = ""
+        guard !t.isEmpty else { return }
+        let id = liveId
+        liveText = t; liveDraft = ""; liveLang = ""; phrase = true; busy = true; hint = "Перевожу…"
+        defer { busy = false; if liveId == id { phrase = false; liveText = "" } }
+        if voice.demo {   // показ на видео: сети нет
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            add(Item(id: id, mine: true, src: "ru", to: to, text: t, out: "Bisa bayar pakai kartu?")); return
+        }
+        do {
+            let r = try await Api.translate(t, to: to)
+            add(Item(id: liveId == id ? id : UUID(), mine: r.mine, src: r.mine ? "ru" : r.src, to: r.to, text: t, out: r.out))
+        } catch {
+            Log.send("err", ["at": "typed", "err": "\(error)"]); hint = "Не получилось перевести — повторите"
+            // написанное не теряется: облако снова с текстом, можно нажать «Перевести» ещё раз
+            if liveId == id, !recording, !arming { phrase = false; liveText = ""; typed = t; typing = true }
+        }
     }
 
     func translatePhoto(_ img: UIImage) async {

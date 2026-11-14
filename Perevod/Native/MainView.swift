@@ -19,7 +19,7 @@ struct MainView: View {
     @ObservedObject var voice: Voice
     @State private var showLangs = false
     @State private var showSettings = UserDefaults.standard.integer(forKey: "demoSettings") > 0   // «-demoSettings N» — снимок настроек в облачной сборке
-    @State private var showType = false
+    @FocusState private var typeFocus: Bool    // клавиатура у облака, в котором пишут текстом
     @State private var showConv = false
     @State private var full: Item? = MainView.demoFull
     @State private var photoItem: PhotosPickerItem?
@@ -39,13 +39,17 @@ struct MainView: View {
             feed
             VStack(spacing: 0) {
                 topBar; Spacer()
-                bottom.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY.rounded() } action: { pull.floor = $0 }
+                // пишут текстом — низ уступает место клавиатуре: всё нужное (поле, «Перевести») в самом облаке
+                if !m.typing {
+                    bottom.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY.rounded() } action: { pull.floor = $0 }
+                        .transition(.opacity)
+                }
             }
+            .animation(.smooth(duration: 0.25), value: m.typing)
             if PullUp.debug { PullDebug(pull: pull) }
         }
         .sheet(isPresented: $showLangs) { LangPicker().environmentObject(m).presentationDetents([.medium, .large]) }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(m) }
-        .sheet(isPresented: $showType) { TypeSheet().environmentObject(m).presentationDetents([.height(260)]) }
         .fullScreenCover(item: $full) { FullView(item: $0) }
         .fullScreenCover(isPresented: $showConv) { ConversationView(voice: voice).environmentObject(m) }
         .fullScreenCover(isPresented: $showCamera) { CameraPicker { img in Task { await m.translatePhoto(img) } }.ignoresSafeArea() }
@@ -82,7 +86,7 @@ struct MainView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     Color.clear.frame(height: 66)
-                    if m.items.isEmpty && !m.phrase { empty }
+                    if m.items.isEmpty && !m.phrase && !m.typing { empty }
                     if m.items.count > shown {
                         Button {
                             let top = slots.first?.id
@@ -94,24 +98,25 @@ struct MainView: View {
                         .frame(maxWidth: .infinity)
                     }
                     ForEach(slots) { it in
-                        let live = m.phrase && it.id == m.liveId
+                        let live = (m.phrase || m.typing) && it.id == m.liveId
                         SwipeRow(off: live, onDelete: { withAnimation(.smooth(duration: 0.32)) { m.remove(it) } },
                                  onSpeak: { voice.say(it.id, text: it.out, lang: it.mine ? it.to : "ru") }) {
                             cell(it, live: live)
                         }
                         .transition(.opacity)
                     }
-                    Color.clear.frame(height: 230).overlay(alignment: .top) { PullHint(pull: pull) }.id("end")
+                    Color.clear.frame(height: m.typing ? 12 : 230).overlay(alignment: .top) { PullHint(pull: pull) }.id("end")
                         // конец ленты в покое стоит на нижнем крае экрана (над полоской «домой»); выше — ленту тянут за край
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY.rounded() } action: { y in
                             pull.end = y
-                            let v = pull.held && pull.fromEnd && !m.phrase && !m.items.isEmpty ? max(0, pull.floor - y) : 0
+                            let v = pull.held && pull.fromEnd && !m.phrase && !m.typing && !m.items.isEmpty ? max(0, pull.floor - y) : 0
                             if v != pull.v { pull.v = v }
                             pull.note()
                         }
                 }
                 .padding(.horizontal, 14)
                 .animation(.smooth(duration: 0.35), value: m.phrase)
+                .animation(.smooth(duration: 0.3), value: m.typing)
                 .animation(.smooth(duration: 0.3), value: m.liveLang)
                 .animation(.smooth(duration: 0.35), value: m.items.count)
                 .animation(.smooth(duration: 0.3), value: sel)
@@ -124,6 +129,19 @@ struct MainView: View {
             }.padding(.bottom, -120) }
             .defaultScrollAnchor(.bottom)
             .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            // пишут текстом: облако с полем встаёт над клавиатурой
+            .onChange(of: m.typing) { _, on in
+                if on {
+                    sel = nil
+                    withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo("end", anchor: .bottom) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { if m.typing { typeFocus = true } }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { if m.typing { withAnimation(.smooth(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) } } }
+                } else { typeFocus = false }
+            }
+            .onChange(of: typeFocus) { _, f in   // клавиатуру убрали, ничего не написав, — облако не нужно
+                if !f, m.typing, m.typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { m.cancelTyping() }
+            }
             .onChange(of: m.phrase) { _, on in if on { sel = nil; withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo("end", anchor: .bottom) } } }
             // к нижнему краю ведём только за новой репликой; удаление и возврат реплики ленту не двигают
             .onChange(of: m.items.count) { was, now in
@@ -134,12 +152,13 @@ struct MainView: View {
                 tail = m.items.last?.id
                 let n = UserDefaults.standard.integer(forKey: "demoSel")   // «-demoSel N» — снимок: открыта N-я реплика с конца
                 if n >= 1, n <= m.items.count { sel = m.items[m.items.count - n].id }
+                if m.typing { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { typeFocus = true } }
             }
             // потянуть ленту вверх за нижний край и отпустить — последний перевод на весь экран (смахнуть вниз — закрыть)
             .onScrollPhaseChange { was, now in
                 let on = now == .interacting || now == .tracking
                 if pull.held, !on {   // отпустили
-                    if pull.v >= PullUp.arm, !m.phrase, let it = m.items.last { full = it }
+                    if pull.v >= PullUp.arm, !m.phrase, !m.typing, let it = m.items.last { full = it }
                     pull.v = 0
                 }
                 if on, !pull.held { pull.fromEnd = pull.end - pull.floor < 12 }   // тянуть надо от самого конца ленты: обычная прокрутка вниз крупно не открывает
@@ -182,24 +201,56 @@ struct MainView: View {
     /// слова сразу пишутся в облаке, а когда перевод готов, облако остаётся на месте — меняется только то, что внутри.
     private var slots: [Item] {
         let last = m.items.count > shown ? Array(m.items.suffix(shown)) : m.items
-        guard m.phrase, !m.items.contains(where: { $0.id == m.liveId }) else { return last }
+        guard m.phrase || m.typing, !m.items.contains(where: { $0.id == m.liveId }) else { return last }
         return last + [Item(id: m.liveId, mine: m.liveLang.isEmpty || m.liveLang == "ru", src: "", to: m.to, text: "", out: "")]
     }
 
     /// Одно облако на всю жизнь реплики: пока говорят → готовый перевод крупно → обычная реплика выше.
     /// Коснулись обычной реплики — под ней появляются те же кнопки, что у последней; ещё раз — убираются.
-    private func cell(_ it: Item, live: Bool) -> some View {
-        let big = live || it.id == m.big
-        let open = !big && it.id == sel
-        return bubble(it, side: big || open ? 22 : 48) {
-            ZStack(alignment: .topLeading) {
-                if live { liveBody(it).transition(.opacity) }
-                else if big { latestBody(it).transition(.opacity) }
-                else { rowBody(it, open: open).transition(.opacity) }
+    @ViewBuilder private func cell(_ it: Item, live: Bool) -> some View {
+        if live && m.typing {
+            bubble(it, side: 22) { typeBody }   // без касаний и меню: они мешали бы полю ввода
+        } else {
+            let big = live || it.id == m.big
+            let open = !big && it.id == sel
+            bubble(it, side: big || open ? 22 : 48) {
+                ZStack(alignment: .topLeading) {
+                    if live { liveBody(it).transition(.opacity) }
+                    else if big { latestBody(it).transition(.opacity) }
+                    else { rowBody(it, open: open).transition(.opacity) }
+                }
             }
+            .onTapGesture { if !live && !big { sel = open ? nil : it.id; Hap.select() } }
+            .contextMenu { if !live { menu(it) } }
         }
-        .onTapGesture { if !live && !big { sel = open ? nil : it.id; Hap.select() } }
-        .contextMenu { if !live { menu(it) } }
+    }
+
+    /// Пишут текстом: поле ввода — в самом облаке, там же «Перевести». Готовый перевод встанет в это же облако.
+    private var typeBody: some View {
+        let none = m.typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Circle().fill(T.me).frame(width: 8, height: 8)
+                Text("Напишите на любом языке").font(T.label).foregroundStyle(T.dim)
+            }
+            TextField("Пишите здесь", text: $m.typed, axis: .vertical)
+                .font(T.live).foregroundStyle(T.ink).lineLimit(1...6)
+                .focused($typeFocus).submitLabel(.send)
+                .onSubmit { Task { await m.sendTyped() } }
+                .onChange(of: m.typed) { _, t in if t.hasSuffix("\n") { Task { await m.sendTyped() } } }   // «ввод» на клавиатуре — перевести
+                .frame(maxWidth: .infinity, minHeight: 34 * T.scale, alignment: .topLeading)
+            HStack(spacing: 8) {
+                chip("xmark") { m.cancelTyping() }.accessibilityLabel("Отмена")
+                Spacer(minLength: 4)
+                Button { Task { await m.sendTyped() } } label: {
+                    Label("Перевести", systemImage: "arrow.up")
+                        .font(T.ui).padding(.horizontal, 16).frame(height: 42)
+                        .background(Capsule().fill(T.goTint))
+                }
+                .disabled(none).opacity(none ? 0.5 : 1)
+            }
+            .foregroundStyle(T.ink).padding(.top, 4)
+        }
     }
 
     private func rowBody(_ it: Item, open: Bool) -> some View {
@@ -297,7 +348,8 @@ struct MainView: View {
                 if abs(v.translation.width) > 40, abs(v.translation.width) > abs(v.translation.height) * 1.5 { withAnimation(.spring(duration: 0.3)) { m.swapLang() } }
             })
             GlassGroup { HStack {
-                Button { showType = true } label: { Image(systemName: "keyboard").font(.system(size: 19)).frame(width: 58, height: 58) }.glass(Circle(), clear: true)
+                Button { m.startTyping() } label: { Image(systemName: "keyboard").font(.system(size: 19)).frame(width: 58, height: 58) }.glass(Circle(), clear: true)
+                    .accessibilityLabel("Написать текстом")
                 Spacer()
                 MicOrb()
                 Spacer()
@@ -645,7 +697,7 @@ private struct SwipeRow<Content: View>: View {
                     .scaleEffect(armed ? 1.2 : 0.9).opacity(gone ? 0 : show).padding(.horizontal, 14)
                     .animation(.spring(duration: 0.25), value: armed)
             }
-            .gesture(SidePan(changed: { x in
+            .gesture(SidePan(off: off, changed: { x in
                 guard !gone, !off else { return }
                 dx = x < 0 ? max(x, -430) : min(x * 0.55, 92)   // вправо — с сопротивлением: это не удаление, а «кнопка»
             }, ended: { v in
@@ -667,6 +719,7 @@ private struct SwipeRow<Content: View>: View {
 /// Горизонтальное движение пальца по реплике. Родной распознаватель: начинается только при явно боковом
 /// движении, а прокрутка ленты ждёт его отказа — лента и реплика никогда не едут одновременно.
 private struct SidePan: UIGestureRecognizerRepresentable {
+    var off = false                            // «живое» облако: жест выключен совсем — не мешает полю ввода
     var changed: (CGFloat) -> Void
     var ended: (CGFloat?) -> Void              // скорость по горизонтали; nil — жест прерван
 
@@ -676,8 +729,11 @@ private struct SidePan: UIGestureRecognizerRepresentable {
         let g = UIPanGestureRecognizer()
         g.maximumNumberOfTouches = 1
         g.delegate = context.coordinator
+        g.isEnabled = !off
         return g
     }
+
+    func updateUIGestureRecognizer(_ g: UIPanGestureRecognizer, context: Context) { g.isEnabled = !off }
 
     func handleUIGestureRecognizerAction(_ g: UIPanGestureRecognizer, context: Context) {
         switch g.state {

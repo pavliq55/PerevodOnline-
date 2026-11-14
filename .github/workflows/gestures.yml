@@ -24,6 +24,7 @@ jobs:
           c=[x for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')]
           c.sort(key=lambda x: ('Pro Max' not in x['name'], x['name'])); print(c[0]['udid'])")
           echo "UDID=$UDID" >> "$GITHUB_ENV"
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false   # клавиатура на экране — для снимка «пишут текстом»
           xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
       - name: Сборка с тестом
         run: |
@@ -59,6 +60,10 @@ jobs:
             xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
             xcrun simctl launch "$UDID" com.pavliq55.tapny -demoMany YES -demoSel 3; sleep 5
             xcrun simctl io "$UDID" screenshot shots/$th-sel.png
+            # пишут текстом: поле ввода прямо в облаке
+            xcrun simctl terminate "$UDID" com.pavliq55.tapny || true
+            xcrun simctl launch "$UDID" com.pavliq55.tapny -demoUI YES -demoType YES; sleep 6
+            xcrun simctl io "$UDID" screenshot shots/$th-type.png
             # перевод на весь экран: от пары слов до текста, который листается
             for n in 1 2 3 4 5 6; do
               xcrun simctl terminate "$UDID" com.pavliq55.tapny || true

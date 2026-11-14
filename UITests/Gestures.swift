@@ -114,6 +114,15 @@ final class Gestures: XCTestCase {
             if b.count > 2 { let r2 = b[b.count - 3]; at(r2.midX, r2.minY + 24).tap(); sleep(2) }
             if app.buttons.matching(identifier: "Озвучить").count != 1 { XCTFail("кнопки не убрались") }
         }
+        step("16 написать текстом: слова набираются прямо в облаке, перевод встаёт в него же")
+        let kb = app.buttons["Написать текстом"]
+        if kb.waitForExistence(timeout: 2) {
+            kb.tap(); sleep(2)
+            app.typeText("Можно оплатить картой?"); sleep(2)
+            let go = app.buttons["Перевести"]
+            if go.exists { go.tap() } else { XCTFail("нет «Перевести»") }
+            sleep(5)
+        } else { XCTFail("нет кнопки «Написать текстом»") }
         step("конец")
     }
 }

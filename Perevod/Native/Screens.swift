@@ -21,27 +21,6 @@ struct LangPicker: View {
     }
 }
 
-struct TypeSheet: View {
-    @EnvironmentObject var m: AppModel
-    @Environment(\.dismiss) var dismiss
-    @State private var text = ""
-    @FocusState private var focus: Bool
-    var body: some View {
-        VStack(spacing: 14) {
-            TextField("Напишите на любом языке…", text: $text, axis: .vertical)
-                .font(T.text).lineLimit(1...5).focused($focus)
-                .padding(16).background(T.field, in: RoundedRectangle(cornerRadius: 20))
-            Button {
-                let t = text; text = ""; dismiss()
-                Task { await m.translateTyped(t) }
-            } label: { Text("Перевести").font(T.ui.weight(.semibold)).frame(maxWidth: .infinity).frame(height: 52) }
-            .glass(Capsule(), tint: T.goTint, clear: true)
-            .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
-        .padding(20).onAppear { focus = true }
-    }
-}
-
 /// Перевод на весь экран — показать собеседнику. Текст всегда стоит НАД кнопками и занимает всё место:
 /// пара слов — «плакатом» по центру; фраза — обычным начертанием от края (в строку входит больше — буквы крупнее);
 /// совсем длинный текст листается. Размер подбирается сам: самый крупный, при котором всё помещается и слова не рвутся.
