@@ -481,12 +481,15 @@ struct RecordingAura: View {
                     .frame(width: g.size.width * 1.1).blur(radius: 60).opacity(scheme == .dark ? 0.48 : 0.75)
                     .rotationEffect(.degrees(t ? 360 : 0))
                     .scaleEffect(t ? 1.06 : 0.94)
+                    // вращение привязано только к самому свету: через withAnimation оно захватывало и сдвиг экрана
+                    // (закрылась клавиатура после ввода текстом — весь экран 9 секунд плыл вниз и прыгал обратно)
+                    .animation(.linear(duration: 9).repeatForever(autoreverses: false), value: t)
             }
             .position(x: g.size.width / 2, y: g.size.height * 0.78)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .onAppear { withAnimation(.linear(duration: 9).repeatForever(autoreverses: false)) { t = true } }
+        .onAppear { DispatchQueue.main.async { t = true } }
     }
 }
 

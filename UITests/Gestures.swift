@@ -122,6 +122,11 @@ final class Gestures: XCTestCase {
             let go = app.buttons["Перевести"]
             if go.exists { go.tap() } else { XCTFail("нет «Перевести»") }
             sleep(5)
+            // клавиатура закрылась — низ экрана (шар, кнопки) должен стоять на месте, а не плыть
+            let y = kb.frame.midY, full = app.frame.height
+            print("KBY \(y) \(full)")
+            if !kb.exists || y < full * 0.85 { XCTFail("после ввода текстом низ экрана не на месте: \(y) из \(full)") }
+            sleep(4)
         } else { XCTFail("нет кнопки «Написать текстом»") }
         step("конец")
     }
