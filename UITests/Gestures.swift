@@ -19,13 +19,17 @@ final class Gestures: XCTestCase {
     }
     private func step(_ name: String) { print("STEP \(name) \(Date().timeIntervalSince1970)") }
 
-    private func big(_ w: CGFloat, _ h: CGFloat) {
-        drag(w / 2, h * 0.5, dx: 0, dy: -260, speed: 500)
+    /// Перевод должен быть открыт на весь экран; смахнуть вниз — закрыть.
+    private func closeBig(_ w: CGFloat, _ h: CGFloat, _ how: String) {
         let flip = app.buttons["Перевернуть"]
-        if !flip.waitForExistence(timeout: 2) { XCTFail("не открылось крупно"); return }
+        if !flip.waitForExistence(timeout: 2) { XCTFail("не открылось крупно: \(how)"); return }
         sleep(1)
         drag(w / 2, h * 0.4, dx: 0, dy: 220, speed: 600); sleep(2)
         if flip.exists { XCTFail("не закрылось смахиванием вниз"); app.buttons.element(boundBy: app.buttons.count - 1).tap(); sleep(1) }
+    }
+    private func big(_ w: CGFloat, _ h: CGFloat) {
+        drag(w / 2, h * 0.5, dx: 0, dy: -260, speed: 500)
+        closeBig(w, h, "потянули ленту вверх")
     }
 
     func testSwipes() {
@@ -103,17 +107,29 @@ final class Gestures: XCTestCase {
             if done.exists { done.tap() } else { XCTFail("нет «Готово»") }
             sleep(1)
         } else { XCTFail("нет кнопки настроек") }
-        step("15 коснуться обычной реплики — под ней кнопки; озвучить оттуда; коснуться ещё раз — кнопки убрались")
+        step("15 коснуться обычной реплики — под ней кнопки; озвучить оттуда; коснуться её ещё раз — крупно; мимо реплик — кнопки убрались")
         b = bubbles()
         if b.count > 2 {
             let r = b[b.count - 3]
             at(r.midX, r.midY).tap(); sleep(2)
+            if app.buttons["Перевернуть"].exists {   // первое касание только раскрывает
+                XCTFail("обычная реплика открылась крупно с первого касания"); drag(w / 2, h * 0.4, dx: 0, dy: 220, speed: 600); sleep(2)
+            }
             let say = app.buttons.matching(identifier: "Озвучить")
             if say.count < 2 { XCTFail("кнопки под обычной репликой не появились: \(say.count)") } else { say.element(boundBy: 0).tap(); sleep(4) }
             b = bubbles()
-            if b.count > 2 { let r2 = b[b.count - 3]; at(r2.midX, r2.minY + 24).tap(); sleep(2) }
+            if b.count > 2 {
+                let r2 = b[b.count - 3]
+                at(r2.midX, r2.minY + 24).tap()
+                closeBig(w, h, "второе касание раскрытой реплики")
+                if app.buttons.matching(identifier: "Копировать").count != 2 { XCTFail("после крупного показа реплика свернулась") }
+                at(7, r2.midY).tap(); sleep(2)
+            }
             if app.buttons.matching(identifier: "Озвучить").count != 1 { XCTFail("кнопки не убрались") }
         }
+        step("15б коснуться последней реплики — сразу крупно: она раскрыта всегда")
+        b = bubbles()
+        if let r = b.last { at(r.midX, r.minY + 44).tap(); closeBig(w, h, "касание последней реплики") }
         step("16 написать текстом: слова набираются прямо в облаке, перевод встаёт в него же")
         let kb = app.buttons["Написать текстом"]
         if kb.waitForExistence(timeout: 2) {

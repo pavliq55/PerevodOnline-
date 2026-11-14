@@ -32,7 +32,7 @@ struct MainView: View {
     @State private var tail: UUID?             // последняя реплика, которую лента уже показала
     @State private var pull = PullUp()         // лента потянута вверх за нижний край
     @State private var shown = 60              // сколько последних реплик в ленте; остальные — по кнопке «Показать раньше»
-    @State private var sel: UUID?              // старая реплика, которой коснулись: под ней те же кнопки, что у последней
+    @State private var sel: UUID?              // старая реплика, которую раскрыли касанием: под ней те же кнопки, что у последней
     @State private var langSwipe = Stamp()     // когда по полоске языков вели пальцем: свайп не должен ещё и открывать список
 
     var body: some View {
@@ -122,6 +122,8 @@ struct MainView: View {
                         }
                 }
                 .padding(.horizontal, 14)
+                // коснулись пустого места ленты — раскрытая старая реплика сворачивается
+                .contentShape(Rectangle()).onTapGesture { if sel != nil { sel = nil } }
                 .animation(.smooth(duration: 0.35), value: m.phrase)
                 .animation(.smooth(duration: 0.3), value: m.typing)
                 .animation(.smooth(duration: 0.3), value: m.liveLang)
@@ -213,7 +215,9 @@ struct MainView: View {
     }
 
     /// Одно облако на всю жизнь реплики: пока говорят → готовый перевод крупно → обычная реплика выше.
-    /// Коснулись обычной реплики — под ней появляются те же кнопки, что у последней; ещё раз — убираются.
+    /// Касание — одно правило на все реплики: у раскрытой (с кнопками) оно показывает перевод на весь экран.
+    /// Последняя раскрыта всегда; обычную первое касание раскрывает (кнопки), второе — показывает крупно.
+    /// Свернуть раскрытую — коснуться другой реплики или пустого места.
     @ViewBuilder private func cell(_ it: Item, live: Bool) -> some View {
         if live && m.typing {
             bubble(it, side: 22) { typeBody }   // без касаний и меню: они мешали бы полю ввода
@@ -227,7 +231,10 @@ struct MainView: View {
                     else { rowBody(it, open: open).transition(.opacity) }
                 }
             }
-            .onTapGesture { if !live && !big { sel = open ? nil : it.id; Hap.select() } }
+            .onTapGesture {
+                if live { return }
+                if big || open { if !m.recording { full = it } } else { sel = it.id; Hap.select() }
+            }
             .contextMenu { if !live { menu(it) } }
         }
     }
@@ -273,7 +280,7 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 10) {
             label(it, latest: true)
             Text(it.out).font(T.big(it.out.count)).foregroundStyle(T.ink).tracking(-0.5)
-                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).onTapGesture { if !m.recording { full = it } }
+                .frame(maxWidth: .infinity, alignment: .leading)
             if !it.photo { Text(it.text).font(T.small).foregroundStyle(T.dim) }
             actions(it).padding(.top, 4)
         }
@@ -294,6 +301,7 @@ struct MainView: View {
             }
         }
         .foregroundStyle(T.ink)
+        .contentShape(Rectangle()).onTapGesture { }   // промах мимо кнопки не открывает перевод крупно
     }
 
     @ViewBuilder private func menu(_ it: Item) -> some View {
