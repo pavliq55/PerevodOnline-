@@ -39,6 +39,7 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIRequiresFullScreen: true
+        UIBackgroundModes: [audio]          # команда Siri «скажи» говорит перевод, не открывая приложение
         ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: Микрофон нужен, чтобы переводить твою речь и речь собеседника.
         NSCameraUsageDescription: Камера нужна, чтобы переводить меню, вывески и документы по фото.

@@ -66,11 +66,11 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
             loadingId = id
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
                 guard let self, self.loadingId == id else { return }
-                self.loadingId = nil; self.start(id, Voice.tone)
+                self.loadingId = nil; self.start(id, Voice.tone, lang == "ru")
             }
             return
         }
-        if let d = cache[key(text, lang)] { start(id, d); Log.send("voice", ["src": "cache", "lang": lang, "kb": d.count / 1024]); return }
+        if let d = cache[key(text, lang)] { start(id, d, lang == "ru"); Log.send("voice", ["src": "cache", "lang": lang, "kb": d.count / 1024]); return }
         loadingId = id
         let t0 = Date()
         Task {
@@ -78,7 +78,7 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
                 let d = try await Api.voice(text, lang: lang)
                 put(d, text: text, lang: lang)
                 Log.send("voice", ["src": "net", "lang": lang, "kb": d.count / 1024, "ms": Log.ms(since: t0), "played": loadingId == id])
-                if loadingId == id { loadingId = nil; start(id, d) }
+                if loadingId == id { loadingId = nil; start(id, d, lang == "ru") }
             } catch {
                 Log.send("err", ["at": "voice", "lang": lang, "err": "\(error)", "ms": Log.ms(since: t0)])
                 if loadingId == id { loadingId = nil; drain() }
@@ -88,12 +88,13 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
 
     /// Звук запускается не на главной очереди: включение звука айфона занимает до 0,3 с, и экран на это время
     /// замирал — реплика, которую смахнули вправо, оставалась сдвинутой. Кнопка сразу показывает «Стоп».
-    private func start(_ id: UUID, _ d: Data) {
+    /// toMe — перевод на русский, то есть для меня: при «Мне — в наушники» он идёт в наушники, остальное — в динамик.
+    private func start(_ id: UUID, _ d: Data, _ toMe: Bool) {
         seq += 1
         let n = seq, r = rate, t0 = Date()
         playingId = id
         Voice.bg.async { @Sendable in
-            Audio.setup()
+            Audio.setup(toMe: toMe)
             let p = try? AVAudioPlayer(data: d)
             if let p { p.delegate = self; p.enableRate = true; p.rate = r; p.prepareToPlay() }
             let ok = p?.play() ?? false

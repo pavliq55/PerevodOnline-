@@ -19,6 +19,13 @@ enum Log {
         Task.detached(priority: .utility) { _ = try? await Api.json("/api/diag", b, timeout: 8) }
     }
 
+    /// То же, но дождаться отправки: команда Siri работает без экрана, сразу после неё приложение засыпает.
+    static func sendNow(_ ev: String, _ f: [String: Any] = [:]) async {
+        guard Shared.token != nil else { return }
+        var b = f; b["t"] = "app"; b["ev"] = ev; b["v"] = v
+        _ = try? await Api.json("/api/diag", b, timeout: 5)
+    }
+
     static func launch() {
         send("launch", ["ios": UIDevice.current.systemVersion, "dev": device,
                         "group": Shared.group.hasSuffix(".tapny") ? "base" : "team"])

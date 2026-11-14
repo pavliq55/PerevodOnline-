@@ -115,6 +115,12 @@ struct OfflineView: View {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
 
+    init() {
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.stop() }      // в фоне микрофон не слушает
+        }
+    }
+
     func start(locale: String, onText: @escaping (String) -> Void) {
         SFSpeechRecognizer.requestAuthorization { st in
             Task { @MainActor in

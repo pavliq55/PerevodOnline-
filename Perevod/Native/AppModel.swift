@@ -71,7 +71,7 @@ struct Item: Identifiable, Codable, Equatable {
     @Published var words: [Word] = Pref.words { didSet { Pref.words = words; applyTr(); rewarm() } }                  // «Мои слова»
     @Published var keep = Pref.int("keep", 60) { didSet { Pref.set(keep, "keep"); save() } }                          // сколько фраз хранить; 0 — не хранить
     static let bigScale: CGFloat = 1.22
-    private static let rates: [Float] = [0.95, 1.12, 1.3]
+    static let rates: [Float] = [0.95, 1.12, 1.3]
     private func applyVoice() { voice.rate = AppModel.rates[min(max(voiceSpeed, 0), 2)]; Api.female = voiceFemale }
     private func applyTr() { Api.tone = casual ? "casual" : ""; Api.gl = words.map { [$0.a, $0.b] } }
     /// Сменили тон, слова или голос — запасное соединение открываем заново, уже с ними.
@@ -137,9 +137,15 @@ struct Item: Identifiable, Codable, Equatable {
         Log.launch()
         Log.send("prefs", ["speakThem": speakThem, "speed": voiceSpeed, "female": voiceFemale, "out": output, "orb": orbMode, "autoStop": autoStop,
                            "haptics": haptics, "big": textBig, "theme": theme, "awake": keepAwake, "draft": showDraft, "casual": casual, "words": words.count, "keep": keep])
-        if loggedIn { Audio.setup(); mic.warm() }
+        if loggedIn, UIApplication.shared.applicationState != .background { Audio.setup(); mic.warm() }   // не при запуске без экрана (Siri)
+        takeInbox()
+        // звук в фоне приложению разрешён (команда Siri «скажи») — запись сама не оборвётся, останавливаем её явно
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in guard let self else { return }; if self.recording { self.cancelRec() }; self.mic.off() }
+        }
+        NotificationCenter.default.addObserver(forName: Inbox.note, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.takeInbox() } }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in guard let self, self.loggedIn else { return }; Audio.setup(); self.mic.warm() }
+            Task { @MainActor in guard let self, self.loggedIn else { return }; Audio.setup(); self.mic.warm(); self.takeInbox() }
         }
     }
 
@@ -359,6 +365,14 @@ struct Item: Identifiable, Codable, Equatable {
             hint = (error as? Api.Fail)?.message == "pin" ? "Нужно войти заново" : "Нет связи — повторите"
             if (error as? Api.Fail)?.message == "pin" { logout() }
         }
+    }
+
+    /// Фразы, сказанные через Siri без открытия приложения, — в ленту. Не прозвучавшую там — озвучить здесь.
+    func takeInbox() {
+        let (new, speak) = Inbox.take()
+        guard !new.isEmpty else { return }
+        items.append(contentsOf: new); save()
+        if let it = new.last, it.id == speak { voice.auto(it.id, text: it.out, lang: it.mine ? it.to : "ru") }
     }
 
     func add(_ it: Item) {

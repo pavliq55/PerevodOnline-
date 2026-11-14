@@ -162,6 +162,9 @@ final class Mic {
         DispatchQueue.main.asyncAfter(deadline: .now() + Mic.keep, execute: w)
     }
 
+    /// Ушли с экрана: микрофон выключить сразу, даже если шла запись.
+    func off() { capturing = false; shown = 0; onLevel?(0); cooldown() }
+
     private func cooldown() {
         guard !capturing else { return }
         cool?.cancel(); ring.removeAll()

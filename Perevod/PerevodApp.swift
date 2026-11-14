@@ -6,7 +6,8 @@ import AVFoundation
 /// вибрация, голос сразу в громкий динамик, озвучка без «разблокировки» касанием.
 @main
 struct PerevodApp: App {
-    init() { Audio.setup() }
+    // запуск без экрана (команда Siri «скажи») звук не трогает: Siri в этот момент ещё слушает
+    init() { DispatchQueue.main.async { if UIApplication.shared.applicationState != .background { Audio.setup() } } }
     var body: some Scene {
         WindowGroup {
             Root()
@@ -44,17 +45,28 @@ extension Notification.Name { static let offlinePrep = Notification.Name("offlin
 enum Audio {
     /// Запись и голос в одном режиме: микрофон включается без задержки, голос — в громкий динамик
     /// (в Safari после записи он шёл в верхний «разговорный»), наушники и AirPods тоже работают.
-    /// «Куда звучит» в настройках: 0 — сам (наушники, если подключены, иначе громкий динамик), 1 — всегда громкий динамик, 2 — к уху.
+    /// «Куда звучит» в настройках: 0 — сам (наушники, если подключены, иначе громкий динамик), 1 — всегда громкий динамик, 2 — к уху,
+    /// 3 — перевод для меня в наушники, перевод для собеседника — из громкого динамика.
     static var out = Shared.defaults.integer(forKey: "output")
     private static var forced = false
-    static func setup() {
+    private static var ownMic = false
+    /// toMe — кому сейчас прозвучит голос: мне (true) или собеседнику (false); nil — голоса нет (запись, запуск).
+    /// Ответ — включился ли звук (без экрана, из команды Siri, может и не включиться).
+    @discardableResult static func setup(toMe: Bool? = nil) -> Bool {
         let s = AVAudioSession.sharedInstance()
         var o: AVAudioSession.CategoryOptions = [.allowBluetoothA2DP]
         if out != 2 { o.insert(.defaultToSpeaker) }
         try? s.setCategory(.playAndRecord, mode: .default, options: o)
         try? s.setAllowHapticsAndSystemSoundsDuringRecording(true)   // иначе при включённом микрофоне айфон глушит всю вибрацию
-        try? s.setActive(true)
-        if out == 1 { if s.currentRoute.outputs.first?.portType != .builtInSpeaker { try? s.overrideOutputAudioPort(.speaker) }; forced = true }
+        var ok = true
+        do { try s.setActive(true) } catch { ok = false }
+        // «мне — в наушники»: айфон лежит между нами — слушает его микрофон, а не гарнитура
+        if out == 3 {
+            if s.preferredInput?.portType != .builtInMic, let m = s.availableInputs?.first(where: { $0.portType == .builtInMic }) { try? s.setPreferredInput(m) }
+            ownMic = true
+        } else if ownMic { try? s.setPreferredInput(nil); ownMic = false }
+        if out == 1 || (out == 3 && toMe == false) { if s.currentRoute.outputs.first?.portType != .builtInSpeaker { try? s.overrideOutputAudioPort(.speaker) }; forced = true }
         else if forced { try? s.overrideOutputAudioPort(.none); forced = false }
+        return ok
     }
 }
