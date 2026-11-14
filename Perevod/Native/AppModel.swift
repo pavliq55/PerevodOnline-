@@ -242,7 +242,7 @@ struct Item: Identifiable, Codable, Equatable {
             if !s.ready && Date().timeIntervalSince(self.recStart) > 3 { self.weakNet = true }
         }
         if !mic.running { Audio.setup() }
-        do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = "Микрофон не включился — разреши доступ в Настройках"; return }
+        do { try mic.start(preroll: !spoke) } catch { arming = false; Log.send("err", ["at": "mic", "err": "\(error)"]); hint = error is Mic.Busy ? "Микрофон занят звонком — напишите текстом" : "Микрофон не включился — разреши доступ в Настройках"; return }
         arming = false; phrase = true; recording = true; recStart = Date(); lastLoud = recStart; lastWord = recStart
         tapOff.prepare()
         hint = toggle ? "Говорите… нажмите, чтобы закончить" : "Говорите… отпустите · ↑ закрепить · ← отмена"

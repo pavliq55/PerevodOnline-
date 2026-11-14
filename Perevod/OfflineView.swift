@@ -130,6 +130,8 @@ struct OfflineView: View {
                 if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
                 self.request = req
                 let input = self.engine.inputNode
+                let fmt = input.outputFormat(forBus: 0)
+                guard fmt.sampleRate > 0, fmt.channelCount > 0 else { return }   // идёт звонок — микрофон занят, иначе приложение упадёт
                 input.removeTap(onBus: 0)
                 input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { b, _ in req.append(b) }
                 self.engine.prepare(); try? self.engine.start()

@@ -428,7 +428,7 @@ struct MicOrb: View {
         .onChange(of: m.big) { _, _ in if !m.recording { doneTick += 1 } }
         .onChange(of: m.recording) { _, r in if !r, m.phrase { sentTick += 1 } }
         .onChange(of: m.hint) { _, h in
-            if ["Не расслышал", "Слишком коротко", "Нет связи", "Не получилось", "Микрофон не включился"].contains(where: { h.hasPrefix($0) }) {
+            if ["Не расслышал", "Слишком коротко", "Нет связи", "Не получилось", "Микрофон не включился", "Микрофон занят"].contains(where: { h.hasPrefix($0) }) {
                 withAnimation(.easeOut(duration: 0.45)) { failTick += 1 }
                 Hap.note(.error)
             }

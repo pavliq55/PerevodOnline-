@@ -119,10 +119,15 @@ final class Mic {
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.cooldown() }
     }
 
+    /// Микрофон занят: идёт звонок (телефон, Telegram, WhatsApp) — айфон отдаёт микрофон только ему.
+    struct Busy: Error {}
+
     private func run() throws {
         guard !engine.isRunning else { return }
         let input = engine.inputNode
         let inFmt = input.outputFormat(forBus: 0)
+        // во время звонка у микрофона «пустой» формат (0 Гц) — с ним installTap роняет приложение прямо при открытии
+        guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else { throw Busy() }
         converter = AVAudioConverter(from: inFmt, to: out)
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: inFmt) { [weak self] buf, _ in self?.process(buf) }
