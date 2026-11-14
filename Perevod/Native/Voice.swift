@@ -15,6 +15,8 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
     var blocked: () -> Bool = { false }      // идёт запись — не говорить
     var rate: Float = 1.12                   // скорость голоса («Скорость» в настройках)
     var demo = false                         // показ на видео: сети нет — голос «готовится» 1,2 с, потом звучит короткий тон
+    // ждём голос для этой реплики: чей придёт первым (сервер шлёт его следом за переводом, или наш запрос) — тот и звучит
+    private var want: (id: UUID, key: String, toMe: Bool, t0: Date)?
     private var seq = 0                      // номер запуска: пока звук готовился, могли нажать «стоп» или другую реплику
     private static let bg = DispatchQueue(label: "voice.start", qos: .userInitiated)
 
@@ -22,8 +24,21 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
 
     func has(_ text: String, _ lang: String) -> Bool { cache[key(text, lang)] != nil }
     func put(_ data: Data, text: String, lang: String) {
-        let k = key(text, lang); cache[k] = data; order.append(k)
+        let k = key(text, lang)
+        if cache[k] == nil { order.append(k) }
+        cache[k] = data
         if order.count > 12 { cache[order.removeFirst()] = nil }
+        if let w = want, w.key == k, loadingId == w.id {
+            want = nil; loadingId = nil
+            Log.send("voice", ["src": "wait", "lang": lang, "kb": data.count / 1024, "ms": Log.ms(since: w.t0)])
+            start(w.id, data, w.toMe)
+        }
+    }
+
+    /// «Мне — в наушники»: звук переходит между наушниками и динамиком около секунды — начинаем заранее, пока голос готовится.
+    func aim(_ toMe: Bool) {
+        guard Audio.out == 3, !demo, playingId == nil else { return }
+        Voice.bg.async { Audio.setup(toMe: toMe) }
     }
     /// Сменили голос — скачанное прежним голосом больше не нужно.
     func flush() { cache = [:]; order = [] }
@@ -58,7 +73,7 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
 
     func stop() {
         seq += 1
-        player?.stop(); player = nil; playingId = nil; loadingId = nil
+        player?.stop(); player = nil; playingId = nil; loadingId = nil; want = nil
     }
 
     private func play(_ id: UUID, _ text: String, _ lang: String) {
@@ -73,15 +88,16 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
         if let d = cache[key(text, lang)] { start(id, d, lang == "ru"); Log.send("voice", ["src": "cache", "lang": lang, "kb": d.count / 1024]); return }
         loadingId = id
         let t0 = Date()
+        want = (id, key(text, lang), lang == "ru", t0)
+        aim(lang == "ru")
         Task {
             do {
                 let d = try await Api.voice(text, lang: lang)
-                put(d, text: text, lang: lang)
                 Log.send("voice", ["src": "net", "lang": lang, "kb": d.count / 1024, "ms": Log.ms(since: t0), "played": loadingId == id])
-                if loadingId == id { loadingId = nil; start(id, d, lang == "ru") }
+                put(d, text: text, lang: lang)       // если реплику ещё ждут — звук запустит put
             } catch {
                 Log.send("err", ["at": "voice", "lang": lang, "err": "\(error)", "ms": Log.ms(since: t0)])
-                if loadingId == id { loadingId = nil; drain() }
+                if loadingId == id { loadingId = nil; want = nil; drain() }
             }
         }
     }
@@ -95,13 +111,14 @@ private final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.
         playingId = id
         Voice.bg.async { @Sendable in
             Audio.setup(toMe: toMe)
+            let sMs = Log.ms(since: t0)
             let p = try? AVAudioPlayer(data: d)
             if let p { p.delegate = self; p.enableRate = true; p.rate = r; p.prepareToPlay() }
             let ok = p?.play() ?? false
             let box = Box(p), ms = Log.ms(since: t0)
             Task { @MainActor in
                 guard n == self.seq else { box.v?.stop(); return }   // уже нажали «стоп» или другую реплику
-                if ok { self.player = box.v; if ms > 250 { Log.send("voice", ["src": "start", "ms": ms]) }; return }
+                if ok { self.player = box.v; if ms > 250 { Log.send("voice", ["src": "start", "ms": ms, "setup": sMs]) }; return }
                 Log.send("err", ["at": "player", "err": box.v == nil ? "не открылся звук" : "play вернул false", "kb": d.count / 1024])
                 self.playingId = nil; self.drain()
             }

@@ -93,8 +93,9 @@ import UIKit
 
 /// Микрофон: 16 кГц моно → μ-law (в сессию) + PCM16 (запасная запись WAV, если онлайн подведёт).
 final class Mic {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var converter: AVAudioConverter?
+    private var want = false           // микрофон должен работать: остановил сам айфон (звук сменился: наушники ↔ динамик) — включаем снова
     private let out = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
     private(set) var pcm = Data()
     private(set) var frames = 0
@@ -117,6 +118,13 @@ final class Mic {
 
     init() {
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.cooldown() }
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] n in
+            let who = n.object as? AVAudioEngine
+            DispatchQueue.main.async {
+                guard let self, who === self.engine, self.want, !self.engine.isRunning else { return }
+                try? self.run()
+            }
+        }
     }
 
     /// Микрофон занят: идёт звонок (телефон, Telegram, WhatsApp) — айфон отдаёт микрофон только ему.
@@ -124,15 +132,20 @@ final class Mic {
 
     private func run() throws {
         guard !engine.isRunning else { return }
-        let input = engine.inputNode
-        let inFmt = input.outputFormat(forBus: 0)
-        // во время звонка у микрофона «пустой» формат (0 Гц) — с ним installTap роняет приложение прямо при открытии
+        var input = engine.inputNode
+        var inFmt = input.outputFormat(forBus: 0)
+        // «пустой» формат (0 Гц) бывает и без звонка — после смены наушники ↔ динамик; тогда выручает новый движок
+        if inFmt.sampleRate <= 0 || inFmt.channelCount == 0 {
+            engine = AVAudioEngine(); input = engine.inputNode; inFmt = input.outputFormat(forBus: 0)
+        }
+        // во время звонка формат так и остаётся пустым — с ним installTap роняет приложение прямо при открытии
         guard inFmt.sampleRate > 0, inFmt.channelCount > 0 else { throw Busy() }
-        converter = AVAudioConverter(from: inFmt, to: out)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 2048, format: inFmt) { [weak self] buf, _ in self?.process(buf) }
+        // формат не задаём — берётся тот, что у микрофона сейчас (заданный и устаревший роняет приложение)
+        input.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buf, _ in self?.process(buf) }
         engine.prepare()
         try engine.start()
+        want = true
     }
 
     /// Включить микрофон заранее. Только если доступ уже разрешён — запрос доступа при открытии приложения не показываем.
@@ -172,12 +185,14 @@ final class Mic {
 
     private func cooldown() {
         guard !capturing else { return }
+        want = false
         cool?.cancel(); ring.removeAll()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
     }
 
     private func process(_ buf: AVAudioPCMBuffer) {
+        if converter?.inputFormat != buf.format { converter = AVAudioConverter(from: buf.format, to: out) }
         guard let converter else { return }
         let cap = AVAudioFrameCount(Double(buf.frameLength) * 16000 / buf.format.sampleRate) + 32
         guard let o = AVAudioPCMBuffer(pcmFormat: out, frameCapacity: cap) else { return }

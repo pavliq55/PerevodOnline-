@@ -56,7 +56,9 @@ enum Audio {
         let s = AVAudioSession.sharedInstance()
         var o: AVAudioSession.CategoryOptions = [.allowBluetoothA2DP]
         if out != 2 { o.insert(.defaultToSpeaker) }
-        try? s.setCategory(.playAndRecord, mode: .default, options: o)
+        // режим ставим, только если он другой: повторная установка сбрасывает «в динамик», и при «Мне — в наушники»
+        // звук перед каждой фразой заново шёл наушники → динамик (1,5 с до голоса вместо 0,65 — журнал 14.11.2026)
+        if s.category != .playAndRecord || s.categoryOptions != o { try? s.setCategory(.playAndRecord, mode: .default, options: o) }
         try? s.setAllowHapticsAndSystemSoundsDuringRecording(true)   // иначе при включённом микрофоне айфон глушит всю вибрацию
         var ok = true
         do { try s.setActive(true) } catch { ok = false }
@@ -66,7 +68,16 @@ enum Audio {
             ownMic = true
         } else if ownMic { try? s.setPreferredInput(nil); ownMic = false }
         if out == 1 || (out == 3 && toMe == false) { if s.currentRoute.outputs.first?.portType != .builtInSpeaker { try? s.overrideOutputAudioPort(.speaker) }; forced = true }
-        else if forced { try? s.overrideOutputAudioPort(.none); forced = false }
+        // при «мне — в наушники» запись звук не трогает: слушает всё равно микрофон айфона, а лишнее переключение — это задержка
+        else if forced, out != 3 || toMe == true { try? s.overrideOutputAudioPort(.none); forced = false }
         return ok
+    }
+
+    /// Что сейчас со звуком — в журнал, когда микрофон не включился.
+    static var state: String {
+        let s = AVAudioSession.sharedInstance()
+        let i = s.currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: "+")
+        let o = s.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: "+")
+        return "in=\(i) out=\(o) sr=\(Int(s.sampleRate)) other=\(s.isOtherAudioPlaying) mode=\(out)"
     }
 }
