@@ -80,7 +80,7 @@ struct FitText: View {
 
     fileprivate struct Spec { var size: CGFloat; var poster = false; var split = false }
     private static let posterSizes: [CGFloat] = [96, 84, 72, 64, 56, 48]
-    private static let readSizes: [CGFloat] = [52, 48, 44, 40, 38, 36, 34, 32]
+    private static let readSizes: [CGFloat] = [72, 64, 58, 52, 48, 44, 40, 38, 36, 34, 32]
     private static let minSize: CGFloat = 32
     private static let rtl: Set<String> = ["ar", "he", "fa", "ur"]
     private static let noSpaces: Set<String> = ["zh", "ja", "th", "lo", "km", "my"]          // пишут без пробелов — строка рвётся где угодно
@@ -114,7 +114,17 @@ struct FitText: View {
                     page(c[13])
                     page(c[14])
                     page(c[15])
-                    LongText(step: c[16].size) { page(c[16]) }
+                    ViewThatFits(in: .vertical) {
+                        page(c[16])
+                        page(c[17])
+                        page(c[18])
+                        page(c[19])
+                        page(c[20])
+                        page(c[21])
+                        page(c[22])
+                        page(c[23])
+                        LongText(step: c[24].size) { page(c[24]) }
+                    }
                 }
             }
             .frame(width: g.size.width, height: g.size.height)
@@ -142,7 +152,7 @@ struct FitText: View {
         }
     }
 
-    /// 16 вариантов «помещается целиком» по убыванию и 17-й — для прокрутки.
+    /// 24 варианта «помещается целиком» по убыванию и 25-й — для прокрутки.
     private func specs(_ width: CGFloat) -> [Spec] {
         // самое широкое слово должно входить в строку целиком — иначе его разорвёт посередине
         let words = text.split(whereSeparator: { $0.isWhitespace }).prefix(400).map(String.init)
@@ -172,8 +182,8 @@ struct FitText: View {
             }
             out.append(Spec(size: lo))
         }
-        out = Array(out.prefix(16))
-        while out.count < 16 { out.append(out.last ?? Spec(size: lo)) }
+        out = Array(out.prefix(24))
+        while out.count < 24 { out.append(out.last ?? Spec(size: lo)) }
         out.append(Spec(size: lo, split: parts.count >= 2))
         return out
     }
@@ -202,7 +212,7 @@ private struct LongText<C: View>: View {
 
     var body: some View {
         let more = rest > 6
-        ScrollView { content.padding(.top, 4).padding(.bottom, 72) }
+        ScrollView { content.padding(.top, 4).padding(.bottom, 40) }
             .scrollPosition($pos)
             .scrollIndicators(.visible)
             .onScrollGeometryChange(for: [CGFloat].self) { g in
@@ -210,18 +220,22 @@ private struct LongText<C: View>: View {
             } action: { _, v in
                 y = v[0]; rest = v[1]; page = v[2]
             }
-            .mask(LinearGradient(stops: [.init(color: Color.black.opacity(y > 6 ? 0 : 1), location: 0), .init(color: Color.black, location: 0.07),
-                                         .init(color: Color.black, location: 0.86), .init(color: Color.black.opacity(more ? 0 : 1), location: 1)],
-                                 startPoint: .top, endPoint: .bottom))
+            // под стрелкой текста нет: строки тают выше неё
+            .mask(VStack(spacing: 0) {
+                LinearGradient(colors: [Color.black.opacity(y > 6 ? 0 : 1), Color.black], startPoint: .top, endPoint: .bottom).frame(height: 36)
+                Color.black
+                LinearGradient(colors: [Color.black, Color.black.opacity(more ? 0 : 1)], startPoint: .top, endPoint: .bottom).frame(height: 64)
+                Color.black.opacity(more ? 0 : 1).frame(height: 44)
+            })
             .overlay(alignment: .bottom) {
                 if more {
                     Button {
-                        let to = y + min(rest, max(120, page - step * 3))
+                        let to = y + min(rest, max(120, page - 108 - step * 1.3))
                         withAnimation(.smooth(duration: 0.45)) { pos.scrollTo(y: to) }
                     } label: {
                         Image(systemName: "chevron.down").font(.system(size: 19, weight: .bold)).frame(width: 50, height: 50)
                     }
-                    .glass(Circle(), clear: true).accessibilityLabel("Дальше").transition(.opacity)
+                    .glass(Circle()).accessibilityLabel("Дальше").transition(.opacity)
                 }
             }
             .animation(.easeOut(duration: 0.2), value: more)
