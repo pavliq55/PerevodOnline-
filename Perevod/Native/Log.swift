@@ -37,7 +37,8 @@ enum Log {
 
     static func launch() {
         send("launch", ["ios": UIDevice.current.systemVersion, "dev": device,
-                        "group": Shared.group.hasSuffix(".tapny") ? "base" : "team"])
+                        "group": Shared.group.hasSuffix(".tapny") ? "base" : "team",
+                        "bid": Bundle.main.bundleIdentifier == "com.pavliq55.tapny" ? "base" : "changed"])   // SideStore меняет имя → фразы Siri не привязываются
     }
 
     static func ms(since t: Date) -> Int { Int(Date().timeIntervalSince(t) * 1000) }
