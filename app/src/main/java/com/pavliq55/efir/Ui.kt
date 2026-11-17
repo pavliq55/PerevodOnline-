@@ -56,7 +56,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -166,11 +165,12 @@ private fun stressed(lines: List<Line>, flow: Boolean = false): AnnotatedString 
 }
 
 /** Куски «как субтитры»: кусок для чтения, под ним мелко — что он значит. */
-private fun chunks(lines: List<Line>): AnnotatedString = buildAnnotatedString {
+private fun chunks(lines: List<Line>, size: Float): AnnotatedString = buildAnnotatedString {
+    val ru = (size * 0.5f).coerceAtLeast(12f)              // смысл — не мельче 12, иначе не прочитать
     lines.forEach { l ->
-        withStyle(ParagraphStyle(lineHeight = 1.2.em)) { read(l.read) }
-        withStyle(ParagraphStyle(lineHeight = 0.95.em)) {
-            withStyle(SpanStyle(fontSize = 0.42.em, color = Dim, fontWeight = FontWeight.Normal, letterSpacing = 0.sp)) { append(l.ru) }
+        withStyle(ParagraphStyle(lineHeight = (size * 1.2f).sp)) { read(l.read) }
+        withStyle(ParagraphStyle(lineHeight = (ru * 1.5f).sp)) {
+            withStyle(SpanStyle(fontSize = ru.sp, color = Dim, fontWeight = FontWeight.Normal, letterSpacing = 0.sp)) { append(l.ru) }
         }
     }
 }
@@ -191,7 +191,8 @@ private fun Current(m: Model, p: Phrase) {
             // сервер прислал куски со смыслом — подача «как субтитры»; иначе — как раньше (откат сервера = откат подачи)
             val chunked = p.lines.isNotEmpty() && p.lines.all { it.ru.isNotBlank() }
             val back = if (chunked) "" else p.back
-            val read = remember(p.id) { if (chunked) chunks(p.lines) else stressed(p.lines, flow = p.lines.size > 3) }
+            val plain = remember(p.id) { stressed(p.lines, flow = p.lines.size > 3) }
+            fun text(s: Float) = if (chunked) chunks(p.lines, s) else plain
             val w = constraints.maxWidth
             val h = constraints.maxHeight
             val gap = with(density) { 12.dp.roundToPx() }
@@ -204,7 +205,7 @@ private fun Current(m: Model, p: Phrase) {
             fun fits(s: Float): Boolean {
                 val wide = readStyle(s).copy(fontWeight = FontWeight.ExtraBold)
                 if (words.any { measurer.measure(it, wide, maxLines = 1, softWrap = false).size.width > w }) return false
-                val r = measurer.measure(read, readStyle(s), constraints = Constraints(maxWidth = w))
+                val r = measurer.measure(text(s), readStyle(s), constraints = Constraints(maxWidth = w))
                 val bh = if (back.isBlank()) 0 else measurer.measure(back, backStyle(s), constraints = Constraints(maxWidth = w)).size.height + gap
                 return r.size.height + bh <= h
             }
@@ -217,7 +218,7 @@ private fun Current(m: Model, p: Phrase) {
                 }
             }
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-                Text(read, style = readStyle(size))
+                Text(text(size), style = readStyle(size))
                 if (back.isNotBlank()) {
                     Spacer(Modifier.height(12.dp))
                     Text(back, style = backStyle(size))
