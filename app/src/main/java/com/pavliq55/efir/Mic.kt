@@ -20,6 +20,8 @@ class Mic {
     private var capturing = false
     private val ring = ArrayDeque<ByteArray>()
     private var out = ByteArrayOutputStream()
+    /** Куда отдавать звук во время записи (μ-law, по 0,1 с) — живое распознавание на сервере. */
+    @Volatile var sink: ((ByteArray) -> Unit)? = null
     @Volatile var level = 0f
         private set
 
@@ -51,7 +53,7 @@ class Mic {
                 }
                 level = peak / 32768f
                 synchronized(this) {
-                    if (capturing) out.write(chunk, 0, n)
+                    if (capturing) { out.write(chunk, 0, n); sink?.invoke(ulaw(chunk)) }
                     else { ring.addLast(chunk); while (ring.size > 4) ring.removeFirst() }
                 }
             }
@@ -73,6 +75,7 @@ class Mic {
         out = ByteArrayOutputStream()
         ring.forEach { out.write(it) }
         ring.clear()
+        if (out.size() > 0) sink?.invoke(ulaw(out.toByteArray()))   // и кусочек до нажатия
         capturing = true
     }
 
@@ -84,7 +87,7 @@ class Mic {
 
     fun cancel() = synchronized(this) { capturing = false; out = ByteArrayOutputStream() }
 
-    private fun ulaw(pcm: ByteArray): ByteArray {
+    fun ulaw(pcm: ByteArray): ByteArray {
         val o = ByteArray(pcm.size / 2)
         for (k in o.indices) {
             var s = ((pcm[2 * k].toInt() and 0xff) or (pcm[2 * k + 1].toInt() shl 8)).toShort().toInt()

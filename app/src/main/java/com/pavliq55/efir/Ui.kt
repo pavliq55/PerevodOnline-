@@ -136,7 +136,9 @@ private fun Main(m: Model) {
         }
         val p = m.current
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
-            if (p == null) Empty() else Current(m, p)
+            // пока говорят и переводят — её слова по ходу речи; готово — фраза для эфира
+            if ((m.recording || m.jobs > 0) && m.heard.isNotBlank()) Heard(m.heard)
+            else if (p == null) Empty() else Current(m, p)
         }
         Bottom(m)
     }
@@ -243,6 +245,15 @@ private fun Current(m: Model, p: Phrase) {
             Chip(if (m.playing == p.id) R.drawable.ic_stop else R.drawable.ic_speak, label, Modifier.weight(1f)) { m.play(p) }
             Chip(R.drawable.ic_full, "В камеру", Modifier.weight(1f)) { m.full = p }
         }
+    }
+}
+
+/** Её слова по ходу речи: видно, что всё слышно, и сразу понятно, если распозналось криво. */
+@Composable
+private fun Heard(text: String) {
+    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp)).background(Color.White.copy(alpha = 0.6f)).padding(22.dp),
+        contentAlignment = Alignment.BottomStart) {
+        Text(text.takeLast(400), fontFamily = Golos, fontSize = 24.sp, lineHeight = 32.sp, color = Dim, fontWeight = FontWeight.Medium)
     }
 }
 

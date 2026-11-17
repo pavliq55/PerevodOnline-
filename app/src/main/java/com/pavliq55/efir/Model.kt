@@ -38,6 +38,8 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
     var loading by mutableStateOf<Long?>(null)
     var voice by mutableIntStateOf(store.voice)
     var busyLogin by mutableStateOf(false)
+    var heard by mutableStateOf(if (demo == "rec") "Всем привет, сегодня я ходила на тренировку, потом хорошо покушала" else "")   // что распознано по ходу речи — сразу на экран
+    private var live: Live? = null
     var pick by mutableStateOf<Long?>(null)           // фраза из истории, выбранная для главного экрана
     var history by mutableStateOf(demo == "hist")
 
@@ -72,10 +74,16 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
         if (recording) { if (latched) finish(); return }       // запись «по нажатию» — второе нажатие её заканчивает
         if (!mic.on) { askMic(); return }
         stopVoice()
+        heard = ""
+        // живой режим: звук сразу на сервер, слова — на экран по ходу речи
+        val lv = key?.let { k -> Live(k, version()) { t -> scope.launch { if (recording || jobs > 0) heard = t } } }
+        live = lv
+        lv?.start()
+        mic.sink = lv?.let { l -> { b: ByteArray -> l.audio(b) } }
         mic.begin()
         recording = true; latched = false; hint = ""
         pressAt = SystemClock.elapsedRealtime()
-        key?.let { k -> scope.launch(Dispatchers.IO) { Net.warm(k) } }
+        key?.let { k -> scope.launch(Dispatchers.IO) { Net.warm(k) } }   // запасной путь (запись целиком) тоже наготове
         scope.launch {
             while (recording) {
                 level = mic.level
@@ -95,30 +103,39 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
 
     fun cancel() {
         if (!recording) return
+        mic.sink = null; live?.cancel(); live = null; heard = ""
         mic.cancel(); recording = false; latched = false; hint = "Отменено"
     }
 
     private fun finish() {
         if (!recording) return
         recording = false; latched = false
+        mic.sink = null
+        val lv = live; live = null
         val secs = mic.seconds()
         val wav = mic.end()
-        if (secs < 0.8f) { hint = "Слишком коротко — скажите фразу целиком"; return }
+        if (secs < 0.8f) { lv?.cancel(); heard = ""; hint = "Слишком коротко — скажите фразу целиком"; return }
         val k = key ?: return
+        lv?.end()
         jobs++
         val t0 = SystemClock.elapsedRealtime()
         scope.launch {
             try {
-                val (p, srv) = withContext(Dispatchers.IO) { Net.translate(k, wav) }
+                // сначала живой режим; не вышло (связь, сбой) — запись целиком, как раньше
+                var how = "live"
+                val (p, srv) = lv?.await(10_000) ?: run { how = "http"; lv?.cancel(); withContext(Dispatchers.IO) { Net.translate(k, wav) } }
+                heard = ""
                 if (p.lines.isEmpty()) hint = "Не расслышала — повторите"
                 else { items.add(p); store.save(items); hint = ""; pick = null }
                 val ms = SystemClock.elapsedRealtime() - t0
                 val sec = (secs * 10).toInt() / 10f
-                scope.launch(Dispatchers.IO) { Net.timing(k, ms, (sec * 1000).toLong(), srv, wav.size / 1024, net(), version()) }
+                scope.launch(Dispatchers.IO) { Net.timing(k, ms, (sec * 1000).toLong(), srv, wav.size / 1024, net() + "/" + how, version()) }
             } catch (e: ApiError) {
+                heard = ""
                 if (e.auth) logout() else hint = e.message ?: "Ошибка"
                 report("translate: ${e.message}")
             } catch (e: Exception) {
+                heard = ""
                 hint = "Нет интернета — повторите"
                 report("translate: $e")
             }
