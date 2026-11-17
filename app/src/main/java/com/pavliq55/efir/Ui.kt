@@ -152,7 +152,8 @@ private fun stressed(lines: List<Line>, flow: Boolean = false): AnnotatedString 
     lines.forEachIndexed { i, l ->
         if (i > 0) { if (flow) withStyle(SpanStyle(color = Dim)) { append("  •  ") } else append("\n") }
         for (ch in l.read) {
-            if (ch.isLetter() && ch.isUpperCase()) withStyle(SpanStyle(color = Stress, fontWeight = FontWeight.Black)) { append(ch) }
+            // ударная гласная — строчная, но розовая и жирнее: заглавные посреди слова глаз спотыкает
+            if (ch.isLetter() && ch.isUpperCase()) withStyle(SpanStyle(color = Stress, fontWeight = FontWeight.ExtraBold)) { append(ch.lowercaseChar()) }
             else append(ch)
         }
     }
@@ -176,16 +177,21 @@ private fun Current(m: Model, p: Phrase) {
             val h = constraints.maxHeight
             val gap = with(density) { 12.dp.roundToPx() }
             // один и тот же стиль — и для замера, и для показа: иначе замер разойдётся с тем, что на экране
-            fun readStyle(s: Float) = TextStyle(fontSize = s.sp, lineHeight = (s * 1.2f).sp, fontWeight = FontWeight.Bold, color = Ink)
+            fun readStyle(s: Float) = TextStyle(fontSize = s.sp, lineHeight = (s * 1.3f).sp, fontWeight = FontWeight.SemiBold, color = Ink,
+                letterSpacing = 0.2.sp)
+            // слова целиком: самое длинное слово должно влезть в строку, иначе его разорвёт («иль-хуру / ф»)
+            val words = remember(p.id) { read.text.split(Regex("\\s+")).filter { it.isNotBlank() } }
             fun backStyle(s: Float): TextStyle { val b = (s * 0.42f).coerceIn(11f, 18f); return TextStyle(fontSize = b.sp, lineHeight = (b * 1.3f).sp, color = Dim) }
             fun fits(s: Float): Boolean {
+                val wide = readStyle(s).copy(fontWeight = FontWeight.ExtraBold)
+                if (words.any { measurer.measure(it, wide, maxLines = 1, softWrap = false).size.width > w }) return false
                 val r = measurer.measure(read, readStyle(s), constraints = Constraints(maxWidth = w))
                 val bh = if (p.back.isBlank()) 0 else measurer.measure(p.back, backStyle(s), constraints = Constraints(maxWidth = w)).size.height + gap
                 return r.size.height + bh <= h
             }
             val size = remember(p.id, w, h) {
                 var lo = 12f
-                var hi = 60f
+                var hi = 40f                       // не крупнее — так спокойнее читать
                 if (fits(hi)) hi else {
                     repeat(9) { val mid = (lo + hi) / 2; if (fits(mid)) lo = mid else hi = mid }
                     lo
