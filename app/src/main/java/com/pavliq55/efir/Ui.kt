@@ -148,9 +148,9 @@ private fun Empty() {
 }
 
 /** Чтение русскими буквами: заглавная гласная — ударение, она выделена цветом. Строки фразы — с новой строки. */
-private fun stressed(lines: List<Line>): AnnotatedString = buildAnnotatedString {
+private fun stressed(lines: List<Line>, flow: Boolean = false): AnnotatedString = buildAnnotatedString {
     lines.forEachIndexed { i, l ->
-        if (i > 0) append("\n")
+        if (i > 0) { if (flow) withStyle(SpanStyle(color = Dim)) { append("  •  ") } else append("\n") }
         for (ch in l.read) {
             if (ch.isLetter() && ch.isUpperCase()) withStyle(SpanStyle(color = Stress, fontWeight = FontWeight.Black)) { append(ch) }
             else append(ch)
@@ -171,13 +171,13 @@ private fun Current(m: Model, p: Phrase) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().alpha(fade)) {
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
-            val read = remember(p.id) { stressed(p.lines) }
+            val read = remember(p.id) { stressed(p.lines, flow = p.lines.size > 3) }   // длинный рассказ — сплошным текстом: ширина не пустует
             val w = constraints.maxWidth
             val h = constraints.maxHeight
             val gap = with(density) { 12.dp.roundToPx() }
             // один и тот же стиль — и для замера, и для показа: иначе замер разойдётся с тем, что на экране
             fun readStyle(s: Float) = TextStyle(fontSize = s.sp, lineHeight = (s * 1.2f).sp, fontWeight = FontWeight.Bold, color = Ink)
-            fun backStyle(s: Float): TextStyle { val b = (s * 0.45f).coerceIn(13f, 19f); return TextStyle(fontSize = b.sp, lineHeight = (b * 1.3f).sp, color = Dim) }
+            fun backStyle(s: Float): TextStyle { val b = (s * 0.42f).coerceIn(11f, 18f); return TextStyle(fontSize = b.sp, lineHeight = (b * 1.3f).sp, color = Dim) }
             fun fits(s: Float): Boolean {
                 val r = measurer.measure(read, readStyle(s), constraints = Constraints(maxWidth = w))
                 val bh = if (p.back.isBlank()) 0 else measurer.measure(p.back, backStyle(s), constraints = Constraints(maxWidth = w)).size.height + gap
@@ -255,10 +255,10 @@ private fun Bottom(m: Model) {
         m.hint.isNotEmpty() -> m.hint
         else -> "Держите и говорите"
     }
-    Column(Modifier.fillMaxWidth().padding(bottom = 18.dp, top = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 14.dp, top = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(status, fontSize = 15.sp, color = if (m.recording) Stress else Dim, textAlign = TextAlign.Center,
             modifier = Modifier.heightIn(min = 22.dp).padding(horizontal = 24.dp))
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             MicButton(m)
             if (m.recording) Box(Modifier.align(Alignment.CenterStart).padding(start = 36.dp).size(56.dp).clip(CircleShape)
@@ -274,7 +274,7 @@ private fun Bottom(m: Model) {
 @Composable
 private fun MicButton(m: Model) {
     val grow by animateFloatAsState(if (m.recording) 1.08f + m.level * 0.5f else 1f, label = "mic")
-    Box(Modifier.size(108.dp).scale(grow).clip(CircleShape)
+    Box(Modifier.size(92.dp).scale(grow).clip(CircleShape)
         .background(if (m.recording) Brush.linearGradient(listOf(Color(0xFFFF5C8A), Color(0xFFFF7A59))) else Warm)
         .pointerInput(Unit) {
             detectTapGestures(onPress = {
@@ -284,7 +284,7 @@ private fun MicButton(m: Model) {
             })
         }, contentAlignment = Alignment.Center) {
         Icon(painterResource(if (m.recording) R.drawable.ic_stop else R.drawable.ic_mic), "Говорить", tint = Color.White,
-            modifier = Modifier.size(if (m.recording) 36.dp else 46.dp))
+            modifier = Modifier.size(if (m.recording) 32.dp else 40.dp))
     }
 }
 
