@@ -9,6 +9,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -105,72 +110,126 @@ private fun Login(m: Model) {
     }
 }
 
-// MARK: главный экран
+// MARK: главный экран — одна фраза целиком, без листания
 @Composable
 private fun Main(m: Model) {
     var settings by remember { mutableStateOf(false) }
-    val list = rememberLazyListState()
-    // новая фраза — лента в самом низу: видно всю фразу вместе с кнопками
-    LaunchedEffect(m.items.size) { if (m.items.isNotEmpty()) list.animateScrollToItem(m.items.size) }
     Column(Modifier.fillMaxSize().systemBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Tapny Эфир", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Ink)
             Spacer(Modifier.weight(1f))
-            Box(Modifier.size(48.dp).clip(CircleShape).clickable { settings = true }, contentAlignment = Alignment.Center) {
-                Icon(painterResource(R.drawable.ic_gear), "Настройки", tint = Ink, modifier = Modifier.size(24.dp))
-            }
+            if (m.items.isNotEmpty()) Round(R.drawable.ic_history, "История") { m.history = true }
+            Round(R.drawable.ic_gear, "Настройки") { settings = true }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (m.items.isEmpty()) item { Empty() }
-            itemsIndexed(m.items, key = { _, p -> p.id }) { i, p -> Card(m, p, latest = i == m.items.lastIndex, Modifier.animateItem()) }
-            item(key = "end") { Spacer(Modifier.height(1.dp)) }
+        val p = m.current
+        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+            if (p == null) Empty() else Current(m, p)
         }
         Bottom(m)
     }
     if (settings) Settings(m) { settings = false }
+    if (m.history) History(m)
+}
+
+@Composable
+private fun Round(icon: Int, label: String, onClick: () -> Unit) {
+    Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(painterResource(icon), label, tint = Ink, modifier = Modifier.size(24.dp))
+    }
 }
 
 @Composable
 private fun Empty() {
-    Column(Modifier.padding(top = 40.dp, start = 8.dp, end = 8.dp)) {
+    Column(Modifier.padding(top = 30.dp, start = 8.dp, end = 8.dp)) {
         Text("Скажите фразу по-русски", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
         Spacer(Modifier.height(8.dp))
         Text("Появится, как сказать по-арабски — русскими буквами. Розовая буква — ударение.", fontSize = 16.sp, color = Dim)
     }
 }
 
-/** Чтение русскими буквами: заглавная гласная — ударение, она выделена цветом. */
-private fun stressed(s: String): AnnotatedString = buildAnnotatedString {
-    for (ch in s) {
-        if (ch.isLetter() && ch.isUpperCase()) withStyle(SpanStyle(color = Stress, fontWeight = FontWeight.Black)) { append(ch) }
-        else append(ch)
+/** Чтение русскими буквами: заглавная гласная — ударение, она выделена цветом. Строки фразы — с новой строки. */
+private fun stressed(lines: List<Line>): AnnotatedString = buildAnnotatedString {
+    lines.forEachIndexed { i, l ->
+        if (i > 0) append("\n")
+        for (ch in l.read) {
+            if (ch.isLetter() && ch.isUpperCase()) withStyle(SpanStyle(color = Stress, fontWeight = FontWeight.Black)) { append(ch) }
+            else append(ch)
+        }
     }
 }
 
-/** Фраза: крупно — как читать (розовая буква — ударение), мелко — смысл. Кнопки — у последней и у той, которой коснулись. */
+/**
+ * Фраза на весь экран: размер букв подбирается так, чтобы ВСЯ фраза и её смысл влезли без листания —
+ * короткая крупно, длинная мельче. Пока говорят новую — прошлая бледнеет.
+ */
 @Composable
-private fun Card(m: Model, p: Phrase, latest: Boolean, modifier: Modifier) {
-    val open = latest || m.sel == p.id
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
-        .background(Color.White.copy(alpha = if (latest) 0.92f else 0.55f))
-        .clickable(enabled = !latest) { m.sel = if (m.sel == p.id) null else p.id }
-        .padding(horizontal = 18.dp, vertical = 16.dp)) {
-        p.lines.forEachIndexed { i, l ->
-            if (i > 0) Spacer(Modifier.height(6.dp))
-            Text(stressed(l.read), fontSize = if (latest) 32.sp else 20.sp, lineHeight = if (latest) 39.sp else 26.sp,
-                fontWeight = FontWeight.Bold, color = Ink)
+private fun Current(m: Model, p: Phrase) {
+    val busy = m.recording || m.jobs > 0
+    val fade by animateFloatAsState(if (busy) 0.3f else 1f, label = "fade")
+    Column(Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp)).background(Color.White.copy(alpha = 0.9f))
+        .padding(horizontal = 20.dp, vertical = 18.dp)) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().alpha(fade)) {
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            val read = remember(p.id) { stressed(p.lines) }
+            val w = constraints.maxWidth
+            val h = constraints.maxHeight
+            val gap = with(density) { 12.dp.roundToPx() }
+            // один и тот же стиль — и для замера, и для показа: иначе замер разойдётся с тем, что на экране
+            fun readStyle(s: Float) = TextStyle(fontSize = s.sp, lineHeight = (s * 1.2f).sp, fontWeight = FontWeight.Bold, color = Ink)
+            fun backStyle(s: Float): TextStyle { val b = (s * 0.45f).coerceIn(13f, 19f); return TextStyle(fontSize = b.sp, lineHeight = (b * 1.3f).sp, color = Dim) }
+            fun fits(s: Float): Boolean {
+                val r = measurer.measure(read, readStyle(s), constraints = Constraints(maxWidth = w))
+                val bh = if (p.back.isBlank()) 0 else measurer.measure(p.back, backStyle(s), constraints = Constraints(maxWidth = w)).size.height + gap
+                return r.size.height + bh <= h
+            }
+            val size = remember(p.id, w, h) {
+                var lo = 12f
+                var hi = 60f
+                if (fits(hi)) hi else {
+                    repeat(9) { val mid = (lo + hi) / 2; if (fits(mid)) lo = mid else hi = mid }
+                    lo
+                }
+            }
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                Text(read, style = readStyle(size))
+                if (p.back.isNotBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(p.back, style = backStyle(size))
+                }
+            }
         }
-        if (p.back.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(p.back, fontSize = if (latest) 15.sp else 13.sp, color = Dim)
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val label = when (p.id) { m.playing -> "Стоп"; m.loading -> "Готовлю…"; else -> "Послушать" }
+            Chip(if (m.playing == p.id) R.drawable.ic_stop else R.drawable.ic_speak, label, Modifier.weight(1f)) { m.play(p) }
+            Chip(R.drawable.ic_full, "В камеру", Modifier.weight(1f)) { m.full = p }
         }
-        if (open) {
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val label = when (p.id) { m.playing -> "Стоп"; m.loading -> "Готовлю…"; else -> "Послушать" }
-                Chip(if (m.playing == p.id) R.drawable.ic_stop else R.drawable.ic_speak, label, Modifier.weight(1f)) { m.play(p) }
-                Chip(R.drawable.ic_full, "В камеру", Modifier.weight(1f)) { m.full = p }
+    }
+}
+
+/** История: прошлые фразы списком; коснуться — фраза снова на главном экране. */
+@Composable
+private fun History(m: Model) {
+    Dialog(onDismissRequest = { m.history = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxSize().background(Back).systemBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("История", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Ink)
+                Spacer(Modifier.weight(1f))
+                Box(Modifier.size(48.dp).clip(CircleShape).clickable { m.history = false }, contentAlignment = Alignment.Center) {
+                    Text("✕", fontSize = 22.sp, color = Ink)
+                }
+            }
+            val list = rememberLazyListState(initialFirstVisibleItemIndex = (m.items.size - 1).coerceAtLeast(0))
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                itemsIndexed(m.items, key = { _, p -> p.id }) { _, p ->
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.75f))
+                        .clickable { m.pick = p.id; m.history = false }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(stressed(p.lines), fontSize = 18.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        if (p.back.isNotBlank()) Text(p.back, fontSize = 13.sp, color = Dim, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
             }
         }
     }

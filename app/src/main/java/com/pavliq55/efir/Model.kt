@@ -27,7 +27,7 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
     private val demoMode = demo != null
 
     var key by mutableStateOf(if (demoMode) (if (demo == "login") null else "demo") else store.key)
-    val items = mutableStateListOf<Phrase>().apply { addAll(if (demoMode) Demo.items else store.history()) }
+    val items = mutableStateListOf<Phrase>().apply { addAll(if (demoMode) (if (demo == "long") Demo.items + Demo.long else Demo.items) else store.history()) }
     var recording by mutableStateOf(demo == "rec")
     var latched by mutableStateOf(demo == "rec")      // короткое нажатие: говорим, пока не нажмут ещё раз
     var jobs by mutableIntStateOf(0)
@@ -38,7 +38,11 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
     var loading by mutableStateOf<Long?>(null)
     var voice by mutableIntStateOf(store.voice)
     var busyLogin by mutableStateOf(false)
-    var sel by mutableStateOf<Long?>(null)            // старая фраза, которой коснулись: у неё тоже кнопки
+    var pick by mutableStateOf<Long?>(null)           // фраза из истории, выбранная для главного экрана
+    var history by mutableStateOf(demo == "hist")
+
+    /** На главном — одна фраза: выбранная из истории или последняя. */
+    val current: Phrase? get() = items.firstOrNull { it.id == pick } ?: items.lastOrNull()
     var askMic: () -> Unit = {}
     private var pressAt = 0L
     private var player: MediaPlayer? = null
@@ -69,7 +73,7 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
         if (!mic.on) { askMic(); return }
         stopVoice()
         mic.begin()
-        recording = true; latched = false; hint = ""; sel = null
+        recording = true; latched = false; hint = ""
         pressAt = SystemClock.elapsedRealtime()
         key?.let { k -> scope.launch(Dispatchers.IO) { Net.warm(k) } }
         scope.launch {
@@ -107,7 +111,7 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
             try {
                 val (p, srv) = withContext(Dispatchers.IO) { Net.translate(k, wav) }
                 if (p.lines.isEmpty()) hint = "Не расслышала — повторите"
-                else { items.add(p); store.save(items); hint = "" }
+                else { items.add(p); store.save(items); hint = ""; pick = null }
                 val ms = SystemClock.elapsedRealtime() - t0
                 val sec = (secs * 10).toInt() / 10f
                 scope.launch(Dispatchers.IO) { Net.timing(k, ms, (sec * 1000).toLong(), srv, wav.size / 1024, net(), version()) }
@@ -180,7 +184,7 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
 
     fun setVoiceMode(v: Int) { voice = v; store.voice = v }
 
-    fun clear() { items.clear(); store.save(items); ctx.cacheDir.listFiles()?.filter { it.name.endsWith(".mp3") }?.forEach { it.delete() } }
+    fun clear() { items.clear(); pick = null; store.save(items); ctx.cacheDir.listFiles()?.filter { it.name.endsWith(".mp3") }?.forEach { it.delete() } }
 
     private fun report(err: String) { val k = key ?: return; if (demoMode) return; scope.launch(Dispatchers.IO) { Net.report(k, err) } }
 }
@@ -196,4 +200,9 @@ object Demo {
             Line("اعملوا فولو ولايك يا حبايبي", "и-мАлу фоллОу уи лАйк я хабАйби"), Line("لو أنا عاجباكم", "лау Ана аджабАкум")),
             "Подпишитесь и поставьте лайк, мои дорогие, если я вам нравлюсь"),
     )
+    val long = listOf(Phrase(4, "Рассказ о дне", listOf(
+        Line("", "лау кунт бтИрджам насс тауИль"), Line("", "у-Ана бас бАуиль э иль-нахарда"), Line("", "инни рахт иль-тамрИн"),
+        Line("", "у-инни акАльт кауИс"), Line("", "у-инни ракабт ид-дараАджа"), Line("", "у-инни кунт шаИля нафси иль-нахарда"),
+        Line("", "у-инни иштагАльт катИр"), Line("", "у-инни шуфт афлам катИр"), Line("", "у-инни фтахт ютУб"), Line("", "у-инни шуфт иш-шамс")),
+        "Если бы я переводила длинный текст, когда просто рассказываю, что делала сегодня: ходила на тренировку, хорошо поела, каталась на байке, занималась собой, много работала, смотрела фильмы, открывала YouTube, смотрела на солнце."))
 }

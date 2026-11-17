@@ -3,7 +3,7 @@
 mkdir -p shots
 adb install -r ci.apk
 adb shell pm grant com.pavliq55.efir android.permission.RECORD_AUDIO
-for d in login main full rec; do
+for d in login main long hist full rec; do
   adb shell am force-stop com.pavliq55.efir
   adb shell am start -n com.pavliq55.efir/.MainActivity --es demo $d
   sleep 6
