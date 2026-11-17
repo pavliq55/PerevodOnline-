@@ -163,18 +163,18 @@ private fun Card(m: Model, p: Phrase, latest: Boolean) {
         Text("Вы: ${p.ru}", fontSize = 13.sp, color = Dim)
         if (p.back.isNotBlank() && p.back.trim() != p.ru.trim()) Text("Смысл: ${p.back}", fontSize = 13.sp, color = Dim)
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val label = when (p.id) { m.playing -> "Стоп"; m.loading -> "Готовлю…"; else -> "Послушать" }
-            Chip(if (m.playing == p.id) R.drawable.ic_stop else R.drawable.ic_speak, label) { m.play(p) }
-            Chip(R.drawable.ic_full, "В камеру") { m.full = p }
+            Chip(if (m.playing == p.id) R.drawable.ic_stop else R.drawable.ic_speak, label, Modifier.weight(1f)) { m.play(p) }
+            Chip(R.drawable.ic_full, "В камеру", Modifier.weight(1f)) { m.full = p }
         }
     }
 }
 
 @Composable
-private fun Chip(icon: Int, text: String, onClick: () -> Unit) {
-    Row(Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(Color(0x1A6B4FB8)).clickable(onClick = onClick)
-        .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun Chip(icon: Int, text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(modifier.height(42.dp).clip(RoundedCornerShape(20.dp)).background(Color(0x1A6B4FB8)).clickable(onClick = onClick)
+        .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         Icon(painterResource(icon), null, tint = ArInk, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
         Text(text, fontSize = 15.sp, color = ArInk, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
