@@ -177,7 +177,7 @@ private fun Chip(icon: Int, text: String, onClick: () -> Unit) {
         .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(painterResource(icon), null, tint = ArInk, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
-        Text(text, fontSize = 15.sp, color = ArInk, fontWeight = FontWeight.SemiBold)
+        Text(text, fontSize = 15.sp, color = ArInk, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 
