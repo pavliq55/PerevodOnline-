@@ -160,7 +160,7 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
         scope.launch {
             val f = File(ctx.cacheDir, "v${p.id}.mp3")
             try {
-                if (!f.exists()) withContext(Dispatchers.IO) { Net.voice(k, p.ar, f) }
+                if (!f.exists()) withContext(Dispatchers.IO) { Net.voice(k, p.say, f) }
                 if (loading != p.id) return@launch
                 val mp = MediaPlayer()
                 mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)

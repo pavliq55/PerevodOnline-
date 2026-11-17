@@ -8,19 +8,21 @@ import java.net.URL
 import java.net.URLEncoder
 
 /** Одна строка для эфира: по-арабски и как её прочитать русскими буквами (ударная гласная — заглавная). */
-data class Line(val ar: String, val read: String, val ru: String = "")
+data class Line(val ar: String, val read: String, val ru: String = "", val say: String = "")
 
 /** Фраза: что сказали по-русски, строки для эфира, обратный перевод для проверки смысла. */
 data class Phrase(val id: Long, val ru: String, val lines: List<Line>, val back: String) {
     val ar: String get() = lines.joinToString(" ") { it.ar }
+    /** Для голоса — арабский с огласовками: из него же построено чтение, поэтому голос и чтение совпадают. */
+    val say: String get() = lines.joinToString(" ") { it.say.ifBlank { it.ar } }
 
     fun toJson(): JSONObject = JSONObject().put("id", id).put("ru", ru).put("back", back)
-        .put("lines", JSONArray().apply { lines.forEach { put(JSONObject().put("ar", it.ar).put("read", it.read).put("ru", it.ru)) } })
+        .put("lines", JSONArray().apply { lines.forEach { put(JSONObject().put("ar", it.ar).put("read", it.read).put("ru", it.ru).put("say", it.say)) } })
 
     companion object {
         fun of(o: JSONObject, id: Long): Phrase {
             val a = o.optJSONArray("lines") ?: JSONArray()
-            val lines = (0 until a.length()).map { a.getJSONObject(it) }.map { Line(it.optString("ar"), it.optString("read"), it.optString("ru")) }
+            val lines = (0 until a.length()).map { a.getJSONObject(it) }.map { Line(it.optString("ar"), it.optString("read"), it.optString("ru"), it.optString("say")) }
             return Phrase(id, o.optString("ru"), lines, o.optString("back"))
         }
     }
