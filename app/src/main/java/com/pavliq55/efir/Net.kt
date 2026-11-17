@@ -58,13 +58,37 @@ object Net {
         return answer(c).optString("token").ifBlank { throw ApiError("Не получилось войти") }
     }
 
-    /** Запись (WAV 16 кГц) → фраза для эфира. Пустая фраза — ничего не расслышали. */
-    fun translate(key: String, wav: ByteArray): Phrase {
-        val c = open("/api/ar", key, true)
-        c.setRequestProperty("Content-Type", "audio/wav")
-        c.setFixedLengthStreamingMode(wav.size)
-        c.outputStream.use { it.write(wav) }
-        return Phrase.of(answer(c), System.currentTimeMillis())
+    /** Запись (μ-law 16 кГц) → фраза для эфира и сколько думал сервер. Пустая фраза — ничего не расслышали.
+     *  Связь оборвалась (мобильный интернет) — ещё одна попытка. */
+    fun translate(key: String, audio: ByteArray): Pair<Phrase, Int> {
+        var last: Exception? = null
+        repeat(2) {
+            try {
+                val c = open("/api/ar", key, true)
+                c.setRequestProperty("Content-Type", "audio/x-ulaw")
+                c.setFixedLengthStreamingMode(audio.size)
+                c.outputStream.use { it.write(audio) }
+                val o = answer(c)
+                return Phrase.of(o, System.currentTimeMillis()) to o.optInt("ms")
+            } catch (e: ApiError) { throw e } catch (e: java.io.IOException) { last = e }
+        }
+        throw last ?: ApiError("Нет связи")
+    }
+
+    /** Прогрев связи, пока говорят: к отпусканию кнопки соединение с сервером уже открыто. */
+    fun warm(key: String) {
+        try { val c = open("/api/check", key, false); c.inputStream.use { it.readBytes() } } catch (_: Exception) {}
+    }
+
+    /** Сколько ждали перевод на телефоне — в журнал сервера. */
+    fun timing(key: String, ms: Long, up: Long, srv: Int, kb: Int, net: String, v: String) {
+        try {
+            val c = open("/api/diag", key, true)
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(JSONObject().put("t", "efir").put("ms", ms).put("up", up).put("srv", srv).put("kb", kb)
+                .put("net", net).put("v", v).toString().toByteArray()) }
+            c.responseCode
+        } catch (_: Exception) {}
     }
 
     /** Арабский женский голос — в файл. */

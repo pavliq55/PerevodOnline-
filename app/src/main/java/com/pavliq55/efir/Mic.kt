@@ -79,17 +79,25 @@ class Mic {
     /** Секунд записано с нажатия (вместе с кусочком до него). */
     fun seconds(): Float = synchronized(this) { out.size() / (rate * 2f) }
 
-    fun end(): ByteArray = synchronized(this) { capturing = false; wav(out.toByteArray()) }
+    /** Конец записи: звук в μ-law (8 бит на отсчёт — вдвое меньше WAV, сервер разворачивает обратно). */
+    fun end(): ByteArray = synchronized(this) { capturing = false; ulaw(out.toByteArray()) }
 
     fun cancel() = synchronized(this) { capturing = false; out = ByteArrayOutputStream() }
 
-    private fun wav(pcm: ByteArray): ByteArray {
-        val h = ByteArray(44)
-        fun put(at: Int, v: Int, len: Int) { for (k in 0 until len) h[at + k] = (v shr (8 * k) and 0xff).toByte() }
-        "RIFF".toByteArray().copyInto(h, 0); put(4, 36 + pcm.size, 4)
-        "WAVE".toByteArray().copyInto(h, 8); "fmt ".toByteArray().copyInto(h, 12)
-        put(16, 16, 4); put(20, 1, 2); put(22, 1, 2); put(24, rate, 4); put(28, rate * 2, 4); put(32, 2, 2); put(34, 16, 2)
-        "data".toByteArray().copyInto(h, 36); put(40, pcm.size, 4)
-        return h + pcm
+    private fun ulaw(pcm: ByteArray): ByteArray {
+        val o = ByteArray(pcm.size / 2)
+        for (k in o.indices) {
+            var s = ((pcm[2 * k].toInt() and 0xff) or (pcm[2 * k + 1].toInt() shl 8)).toShort().toInt()
+            var sign = 0
+            if (s < 0) { s = -s; sign = 0x80 }
+            if (s > 32635) s = 32635
+            s += 0x84
+            var exp = 7
+            var mask = 0x4000
+            while (exp > 0 && (s and mask) == 0) { exp--; mask = mask shr 1 }
+            val mant = (s shr (exp + 3)) and 0x0F
+            o[k] = (sign or (exp shl 4) or mant).inv().toByte()
+        }
+        return o
     }
 }

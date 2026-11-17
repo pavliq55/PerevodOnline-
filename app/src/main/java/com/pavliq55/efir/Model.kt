@@ -38,6 +38,7 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
     var loading by mutableStateOf<Long?>(null)
     var voice by mutableIntStateOf(store.voice)
     var busyLogin by mutableStateOf(false)
+    var sel by mutableStateOf<Long?>(null)            // старая фраза, которой коснулись: у неё тоже кнопки
     var askMic: () -> Unit = {}
     private var pressAt = 0L
     private var player: MediaPlayer? = null
@@ -68,8 +69,9 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
         if (!mic.on) { askMic(); return }
         stopVoice()
         mic.begin()
-        recording = true; latched = false; hint = ""
+        recording = true; latched = false; hint = ""; sel = null
         pressAt = SystemClock.elapsedRealtime()
+        key?.let { k -> scope.launch(Dispatchers.IO) { Net.warm(k) } }
         scope.launch {
             while (recording) {
                 level = mic.level
@@ -100,11 +102,15 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
         if (secs < 0.8f) { hint = "Слишком коротко — скажите фразу целиком"; return }
         val k = key ?: return
         jobs++
+        val t0 = SystemClock.elapsedRealtime()
         scope.launch {
             try {
-                val p = withContext(Dispatchers.IO) { Net.translate(k, wav) }
-                if (p.lines.isEmpty()) hint = "Не расслышала — повторите, пожалуйста"
+                val (p, srv) = withContext(Dispatchers.IO) { Net.translate(k, wav) }
+                if (p.lines.isEmpty()) hint = "Не расслышала — повторите"
                 else { items.add(p); store.save(items); hint = "" }
+                val ms = SystemClock.elapsedRealtime() - t0
+                val sec = (secs * 10).toInt() / 10f
+                scope.launch(Dispatchers.IO) { Net.timing(k, ms, (sec * 1000).toLong(), srv, wav.size / 1024, net(), version()) }
             } catch (e: ApiError) {
                 if (e.auth) logout() else hint = e.message ?: "Ошибка"
                 report("translate: ${e.message}")
@@ -115,6 +121,20 @@ class Model(private val ctx: Context, private val mic: Mic, demo: String?) {
             jobs--
         }
     }
+
+    private fun net(): String {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java) ?: return "?"
+        val c = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "нет"
+        return when {
+            c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+            else -> "other"
+        }
+    }
+
+    private fun version(): String = try {
+        "a" + ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode
+    } catch (e: Exception) { "a?" }
 
     fun onPause() { if (recording) cancel(); stopVoice() }
 

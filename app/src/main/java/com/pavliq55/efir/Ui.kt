@@ -123,7 +123,7 @@ private fun Main(m: Model) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (m.items.isEmpty()) item { Empty() }
-            itemsIndexed(m.items, key = { _, p -> p.id }) { i, p -> Card(m, p, latest = i == m.items.lastIndex) }
+            itemsIndexed(m.items, key = { _, p -> p.id }) { i, p -> Card(m, p, latest = i == m.items.lastIndex, Modifier.animateItem()) }
             item(key = "end") { Spacer(Modifier.height(1.dp)) }
         }
         Bottom(m)
@@ -136,7 +136,7 @@ private fun Empty() {
     Column(Modifier.padding(top = 40.dp, start = 8.dp, end = 8.dp)) {
         Text("Скажите фразу по-русски", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
         Spacer(Modifier.height(8.dp))
-        Text("Здесь появится, как её сказать по-арабски: крупно — русскими буквами, выделенная буква — ударение.", fontSize = 16.sp, color = Dim)
+        Text("Появится, как сказать по-арабски — русскими буквами. Розовая буква — ударение.", fontSize = 16.sp, color = Dim)
     }
 }
 
@@ -148,25 +148,30 @@ private fun stressed(s: String): AnnotatedString = buildAnnotatedString {
     }
 }
 
+/** Фраза: крупно — как читать (розовая буква — ударение), мелко — смысл. Кнопки — у последней и у той, которой коснулись. */
 @Composable
-private fun Card(m: Model, p: Phrase, latest: Boolean) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
-        .background(Color.White.copy(alpha = if (latest) 0.9f else 0.55f)).padding(horizontal = 18.dp, vertical = 16.dp)) {
+private fun Card(m: Model, p: Phrase, latest: Boolean, modifier: Modifier) {
+    val open = latest || m.sel == p.id
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
+        .background(Color.White.copy(alpha = if (latest) 0.92f else 0.55f))
+        .clickable(enabled = !latest) { m.sel = if (m.sel == p.id) null else p.id }
+        .padding(horizontal = 18.dp, vertical = 16.dp)) {
         p.lines.forEachIndexed { i, l ->
-            if (i > 0) Spacer(Modifier.height(10.dp))
-            Text(stressed(l.read), fontSize = if (latest) 30.sp else 20.sp, lineHeight = if (latest) 36.sp else 25.sp,
+            if (i > 0) Spacer(Modifier.height(6.dp))
+            Text(stressed(l.read), fontSize = if (latest) 32.sp else 20.sp, lineHeight = if (latest) 39.sp else 26.sp,
                 fontWeight = FontWeight.Bold, color = Ink)
-            Text(l.ar, fontSize = if (latest) 21.sp else 16.sp, color = ArInk, modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                style = TextStyle(textDirection = TextDirection.Rtl, textAlign = TextAlign.End))
         }
-        Spacer(Modifier.height(10.dp))
-        Text("Вы: ${p.ru}", fontSize = 13.sp, color = Dim)
-        if (p.back.isNotBlank() && p.back.trim() != p.ru.trim()) Text("Смысл: ${p.back}", fontSize = 13.sp, color = Dim)
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val label = when (p.id) { m.playing -> "Стоп"; m.loading -> "Готовлю…"; else -> "Послушать" }
-            Chip(if (m.playing == p.id) R.drawable.ic_stop else R.drawable.ic_speak, label, Modifier.weight(1f)) { m.play(p) }
-            Chip(R.drawable.ic_full, "В камеру", Modifier.weight(1f)) { m.full = p }
+        if (p.back.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(p.back, fontSize = if (latest) 15.sp else 13.sp, color = Dim)
+        }
+        if (open) {
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val label = when (p.id) { m.playing -> "Стоп"; m.loading -> "Готовлю…"; else -> "Послушать" }
+                Chip(if (m.playing == p.id) R.drawable.ic_stop else R.drawable.ic_speak, label, Modifier.weight(1f)) { m.play(p) }
+                Chip(R.drawable.ic_full, "В камеру", Modifier.weight(1f)) { m.full = p }
+            }
         }
     }
 }
@@ -185,15 +190,15 @@ private fun Chip(icon: Int, text: String, modifier: Modifier = Modifier, onClick
 @Composable
 private fun Bottom(m: Model) {
     val status = when {
-        m.recording && m.latched -> "Говорите… нажмите ещё раз — перевести"
-        m.recording -> "Говорите… отпустите — перевести"
+        m.recording && m.latched -> "Слушаю… нажмите, чтобы перевести"
+        m.recording -> "Слушаю…"
         m.jobs > 0 -> "Перевожу…"
         m.hint.isNotEmpty() -> m.hint
-        else -> "Держите кнопку и говорите\nили нажмите один раз, а в конце — ещё раз"
+        else -> "Держите и говорите"
     }
     Column(Modifier.fillMaxWidth().padding(bottom = 18.dp, top = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(status, fontSize = 15.sp, color = if (m.recording) Stress else Dim, textAlign = TextAlign.Center,
-            modifier = Modifier.heightIn(min = 40.dp).padding(horizontal = 24.dp))
+            modifier = Modifier.heightIn(min = 22.dp).padding(horizontal = 24.dp))
         Spacer(Modifier.height(10.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             MicButton(m)
