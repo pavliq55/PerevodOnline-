@@ -110,7 +110,8 @@ private fun Login(m: Model) {
 private fun Main(m: Model) {
     var settings by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
-    LaunchedEffect(m.items.size) { if (m.items.isNotEmpty()) list.animateScrollToItem(m.items.size - 1) }
+    // новая фраза — лента в самом низу: видно всю фразу вместе с кнопками
+    LaunchedEffect(m.items.size) { if (m.items.isNotEmpty()) list.animateScrollToItem(m.items.size) }
     Column(Modifier.fillMaxSize().systemBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Tapny Эфир", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Ink)
@@ -123,6 +124,7 @@ private fun Main(m: Model) {
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (m.items.isEmpty()) item { Empty() }
             itemsIndexed(m.items, key = { _, p -> p.id }) { i, p -> Card(m, p, latest = i == m.items.lastIndex) }
+            item(key = "end") { Spacer(Modifier.height(1.dp)) }
         }
         Bottom(m)
     }
