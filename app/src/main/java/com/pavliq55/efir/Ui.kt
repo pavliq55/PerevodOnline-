@@ -55,6 +55,10 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -75,6 +79,14 @@ private val Dim = Color(0xFF7A6C7E)
 private val Stress = Color(0xFFE0457B)     // ударная гласная
 private val ArInk = Color(0xFF6B4FB8)
 private val Warm = Brush.linearGradient(listOf(Color(0xFFFF8FB1), Color(0xFFFFA77F)))
+/** Golos Text — шрифт «Госуслуг», сделан для лёгкого чтения кириллицы (сравнение 6 шрифтов на фразе Павла, 17.11). */
+@OptIn(ExperimentalTextApi::class)
+private val Golos = FontFamily(
+    Font(R.font.golos_text, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(R.font.golos_text, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(R.font.golos_text, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(R.font.golos_text, FontWeight.ExtraBold, variationSettings = FontVariation.Settings(FontVariation.weight(800))),
+)
 private val Back = Brush.verticalGradient(listOf(Color(0xFFFFF3E8), Color(0xFFFFE6EE), Color(0xFFF0E7FF)))
 
 @Composable
@@ -165,13 +177,11 @@ private fun stressed(lines: List<Line>, flow: Boolean = false): AnnotatedString 
 }
 
 /** Куски «как субтитры»: кусок для чтения, под ним мелко — что он значит. */
+// 17.11, Павел: смысл под каждым куском мешал читать — сверху только чтение, смысл один, внизу.
 private fun chunks(lines: List<Line>, size: Float): AnnotatedString = buildAnnotatedString {
-    val ru = (size * 0.5f).coerceAtLeast(12f)              // смысл — не мельче 12, иначе не прочитать
-    lines.forEach { l ->
-        withStyle(ParagraphStyle(lineHeight = (size * 1.2f).sp)) { read(l.read) }
-        withStyle(ParagraphStyle(lineHeight = (ru * 1.5f).sp)) {
-            withStyle(SpanStyle(fontSize = ru.sp, color = Dim, fontWeight = FontWeight.Normal, letterSpacing = 0.sp)) { append(l.ru) }
-        }
+    lines.forEachIndexed { i, l ->
+        if (i > 0) withStyle(ParagraphStyle(lineHeight = (size * 0.3f).sp)) { withStyle(SpanStyle(fontSize = (size * 0.3f).sp)) { append("\u200B") } }
+        withStyle(ParagraphStyle(lineHeight = (size * 1.22f).sp)) { read(l.read) }
     }
 }
 
@@ -190,18 +200,18 @@ private fun Current(m: Model, p: Phrase) {
             val density = LocalDensity.current
             // сервер прислал куски со смыслом — подача «как субтитры»; иначе — как раньше (откат сервера = откат подачи)
             val chunked = p.lines.isNotEmpty() && p.lines.all { it.ru.isNotBlank() }
-            val back = if (chunked) "" else p.back
+            val back = p.back
             val plain = remember(p.id) { stressed(p.lines, flow = p.lines.size > 3) }
             fun text(s: Float) = if (chunked) chunks(p.lines, s) else plain
             val w = constraints.maxWidth
             val h = constraints.maxHeight
-            val gap = with(density) { 12.dp.roundToPx() }
+            val gap = with(density) { 33.dp.roundToPx() }      // 16 + линия 1 + 16
             // один и тот же стиль — и для замера, и для показа: иначе замер разойдётся с тем, что на экране
-            fun readStyle(s: Float) = TextStyle(fontSize = s.sp, lineHeight = (s * 1.3f).sp, fontWeight = FontWeight.SemiBold, color = Ink,
-                letterSpacing = 0.2.sp)
+            fun readStyle(s: Float) = TextStyle(fontFamily = Golos, fontSize = s.sp, lineHeight = (s * 1.3f).sp, fontWeight = FontWeight.SemiBold, color = Ink,
+                letterSpacing = 0.3.sp)
             // слова целиком: самое длинное слово должно влезть в строку, иначе его разорвёт («иль-хуру / ф»)
             val words = remember(p.id) { p.lines.flatMap { it.read.split(Regex("\\s+")) }.filter { it.isNotBlank() } }
-            fun backStyle(s: Float): TextStyle { val b = (s * 0.42f).coerceIn(11f, 18f); return TextStyle(fontSize = b.sp, lineHeight = (b * 1.3f).sp, color = Dim) }
+            fun backStyle(s: Float): TextStyle { val b = (s * 0.45f).coerceIn(13f, 19f); return TextStyle(fontFamily = Golos, fontSize = b.sp, lineHeight = (b * 1.35f).sp, color = Dim) }
             fun fits(s: Float): Boolean {
                 val wide = readStyle(s).copy(fontWeight = FontWeight.ExtraBold)
                 if (words.any { measurer.measure(it, wide, maxLines = 1, softWrap = false).size.width > w }) return false
@@ -220,7 +230,9 @@ private fun Current(m: Model, p: Phrase) {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
                 Text(text(size), style = readStyle(size))
                 if (back.isNotBlank()) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Box(Modifier.fillMaxWidth(0.25f).height(1.dp).background(Dim.copy(alpha = 0.3f)))   // чтение и смысл не смешиваются
+                    Spacer(Modifier.height(16.dp))
                     Text(back, style = backStyle(size))
                 }
             }
@@ -252,7 +264,7 @@ private fun History(m: Model) {
                 itemsIndexed(m.items, key = { _, p -> p.id }) { _, p ->
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.75f))
                         .clickable { m.pick = p.id; m.history = false }.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                        Text(stressed(p.lines), fontSize = 18.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text(stressed(p.lines), fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, color = Ink, fontFamily = Golos)
                         if (p.back.isNotBlank()) Text(p.back, fontSize = 13.sp, color = Dim, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
